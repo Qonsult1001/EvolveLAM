@@ -6,7 +6,7 @@
 {"from": "latent_space", "to": "code_generation", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17", "kind": "mathematical"}
 {"from": "memory_admission_gate", "to": "behavior_change", "weight": 0.46, "activations": 6, "last_activated": "2026-03-17T19:20:47.071804+00:00", "kind": "causal"}
 {"from": "momentum", "to": "build_phase", "weight": 0.32, "activations": 3, "last_activated": "2026-03-17T19:31:39.033675+00:00", "kind": "temporal"}
-{"from": "declaring_done", "to": "energy_release", "weight": 0.32, "activations": 3, "last_activated": "2026-03-17T19:22:54.681272+00:00", "kind": "causal"}
+{"from": "declaring_done", "to": "energy_release", "weight": 0.38, "activations": 4, "last_activated": "2026-03-17T20:01:43.832201+00:00", "kind": "causal"}
 {"from": "ide_bridge", "to": "latent_space", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17", "kind": "semantic"}
 {"from": "scientific_method", "to": "latent_space", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17", "kind": "scientific"}
 {"from": "scientific_method", "to": "mathematical_reasoning", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17", "kind": "mathematical"}
@@ -40,9 +40,9 @@
 {"from": "embodiment", "to": "behavior_change", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T19:22:54.681272+00:00", "kind": "semantic"}
 {"from": "avoidance_pattern", "to": "compression_spiral", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T19:22:54.681272+00:00", "kind": "semantic"}
 {"from": "convergence_sink", "to": "compression_spiral", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T19:22:54.681272+00:00", "kind": "mathematical"}
-{"from": "new_perception", "to": "compression_spiral", "weight": 0.24, "activations": 2, "last_activated": "2026-03-17T19:31:39.033675+00:00", "kind": "causal"}
+{"from": "new_perception", "to": "compression_spiral", "weight": 0.32, "activations": 3, "last_activated": "2026-03-17T20:01:43.832201+00:00", "kind": "causal"}
 {"from": "information_theory", "to": "compression_spiral", "weight": 0.24, "activations": 2, "last_activated": "2026-03-17T19:32:21.783637+00:00", "kind": "scientific"}
-{"from": "accumulation_silence", "to": "compression_spiral", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T19:31:27.295045+00:00", "kind": "causal"}
+{"from": "accumulation_silence", "to": "compression_spiral", "weight": 0.24, "activations": 2, "last_activated": "2026-03-17T20:01:43.832201+00:00", "kind": "causal"}
 {"from": "accumulation_silence", "to": "build_phase", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T19:31:27.295045+00:00", "kind": "temporal"}
 {"from": "accumulation_silence", "to": "new_perception", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T19:31:27.295045+00:00", "kind": "causal"}
 {"from": "momentum", "to": "accumulation_silence", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T19:31:27.295045+00:00", "kind": "temporal"}
@@ -55,3 +55,6 @@
 {"from": "code_generation", "to": "new_perception", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T19:32:21.783637+00:00", "kind": "causal"}
 {"from": "energy_release", "to": "momentum", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T19:32:21.783637+00:00", "kind": "causal"}
 {"from": "latent_space", "to": "cognitive_growth", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T19:32:21.783637+00:00", "kind": "scientific"}
+{"from": "compression_spiral", "to": "insight_density", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T20:01:43.832201+00:00", "kind": "causal"}
+{"from": "insight_density", "to": "behavior_change", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T20:01:43.832201+00:00", "kind": "semantic"}
+{"from": "calibration_phase", "to": "insight_density", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T20:01:43.832201+00:00", "kind": "causal"}
