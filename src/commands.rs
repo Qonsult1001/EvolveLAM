@@ -60,6 +60,7 @@ pub const KNOWN_COMMANDS: &[&str] = &[
     "/remember",
     "/memories",
     "/provider",
+    "/ast",
 ];
 
 /// Well-known model names for `/model <Tab>` completion.
@@ -218,6 +219,7 @@ pub fn help_text() -> String {
     out.push_str("  /find <pattern>    Fuzzy-search project files by name\n");
     out.push_str("  /index             Build a lightweight index of project source files\n");
     out.push_str("  /tree [depth]      Show project directory tree (default depth: 3)\n");
+    out.push_str("  /ast <pattern>     Search code symbols (fn, struct, trait, class, etc.)\n");
     out.push('\n');
 
     // ── AI ──
@@ -507,8 +509,8 @@ pub use crate::commands_git::{
 
 // Project-related handlers
 pub use crate::commands_project::{
-    handle_context, handle_docs, handle_find, handle_fix, handle_health, handle_index, handle_init,
-    handle_lint, handle_run, handle_run_usage, handle_test, handle_tree,
+    handle_ast, handle_context, handle_docs, handle_find, handle_fix, handle_health, handle_index,
+    handle_init, handle_lint, handle_run, handle_run_usage, handle_test, handle_tree,
 };
 
 // Session-related handlers
@@ -519,6 +521,8 @@ pub use crate::commands_session::{
 };
 
 // Memory-related handlers
+#[cfg(test)]
+pub use crate::memory::add_memory_force;
 pub use crate::memory::{add_memory, load_memories, remove_memory, save_memories};
 
 // ── /remember ────────────────────────────────────────────────────────────
@@ -539,7 +543,10 @@ pub fn handle_remember(input: &str) {
         return;
     }
     let mut memory = load_memories();
-    add_memory(&mut memory, &note);
+    if !add_memory(&mut memory, &note) {
+        println!("{DIM}  ⚡ Similar memory already exists, skipping duplicate.{RESET}\n");
+        return;
+    }
     match save_memories(&memory) {
         Ok(_) => {
             println!(
@@ -2736,9 +2743,9 @@ mod tests {
         let mut mem = load_memories_from(&path);
         assert!(mem.entries.is_empty());
 
-        // Add
-        add_memory(&mut mem, "uses sqlx");
-        add_memory(&mut mem, "docker needed");
+        // Add (use force to bypass dedup for short test strings)
+        add_memory_force(&mut mem, "uses sqlx");
+        add_memory_force(&mut mem, "docker needed");
         assert_eq!(mem.entries.len(), 2);
 
         // Save & reload

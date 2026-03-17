@@ -176,10 +176,8 @@ pub fn fetch_docs_summary(crate_name: &str) -> (bool, String) {
     }
     if !items_display.is_empty() {
         summary.push_str(&format!("\n{items_display}"));
-    } else {
-        if !summary.contains("📝") {
-            summary.push_str("  Docs available at the URL above.");
-        }
+    } else if !summary.contains("📝") {
+        summary.push_str("  Docs available at the URL above.");
     }
 
     (true, summary)

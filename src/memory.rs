@@ -63,13 +63,70 @@ pub fn save_memories_to(memory: &ProjectMemory, path: &Path) -> Result<(), Strin
     std::fs::write(path, json).map_err(|e| format!("Failed to write {}: {}", path.display(), e))
 }
 
+/// Compute similarity between two strings using bigram overlap (Dice coefficient).
+/// Returns a value between 0.0 (completely different) and 1.0 (identical).
+pub fn text_similarity(a: &str, b: &str) -> f64 {
+    let a_lower = a.to_lowercase();
+    let b_lower = b.to_lowercase();
+
+    let bigrams_a = bigrams(&a_lower);
+    let bigrams_b = bigrams(&b_lower);
+
+    if bigrams_a.is_empty() && bigrams_b.is_empty() {
+        return 1.0; // both empty = identical
+    }
+    if bigrams_a.is_empty() || bigrams_b.is_empty() {
+        return 0.0;
+    }
+
+    let intersection = bigrams_a.iter().filter(|bg| bigrams_b.contains(bg)).count();
+    (2.0 * intersection as f64) / (bigrams_a.len() + bigrams_b.len()) as f64
+}
+
+/// Extract character bigrams from a string.
+fn bigrams(s: &str) -> Vec<(char, char)> {
+    let chars: Vec<char> = s
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == ' ')
+        .collect();
+    chars.windows(2).map(|w| (w[0], w[1])).collect()
+}
+
+/// Threshold for considering two memories as duplicates.
+const SIMILARITY_THRESHOLD: f64 = 0.75;
+
 /// Add a new memory entry with the current timestamp.
-pub fn add_memory(memory: &mut ProjectMemory, note: &str) {
+/// Returns true if the memory was added, false if it was too similar to an existing one.
+pub fn add_memory(memory: &mut ProjectMemory, note: &str) -> bool {
+    // Check for near-duplicates
+    if is_duplicate(memory, note) {
+        return false;
+    }
+
     let timestamp = current_timestamp();
     memory.entries.push(MemoryEntry {
         note: note.to_string(),
         timestamp,
     });
+    true
+}
+
+/// Add a memory entry without dedup check (used in tests).
+#[allow(dead_code)]
+pub fn add_memory_force(memory: &mut ProjectMemory, note: &str) {
+    let timestamp = current_timestamp();
+    memory.entries.push(MemoryEntry {
+        note: note.to_string(),
+        timestamp,
+    });
+}
+
+/// Check if a note is too similar to any existing memory.
+pub fn is_duplicate(memory: &ProjectMemory, note: &str) -> bool {
+    memory
+        .entries
+        .iter()
+        .any(|e| text_similarity(&e.note, note) >= SIMILARITY_THRESHOLD)
 }
 
 /// Remove a memory entry by index (0-based).
@@ -170,14 +227,66 @@ mod tests {
         let mut memory = ProjectMemory::default();
         assert!(memory.entries.is_empty());
 
-        add_memory(&mut memory, "this project uses sqlx");
+        let added = add_memory(&mut memory, "this project uses sqlx");
+        assert!(added);
         assert_eq!(memory.entries.len(), 1);
         assert_eq!(memory.entries[0].note, "this project uses sqlx");
         assert!(!memory.entries[0].timestamp.is_empty());
 
-        add_memory(&mut memory, "tests need docker");
+        let added = add_memory(&mut memory, "tests need docker");
+        assert!(added);
         assert_eq!(memory.entries.len(), 2);
         assert_eq!(memory.entries[1].note, "tests need docker");
+    }
+
+    #[test]
+    fn test_add_memory_dedup_rejects_similar() {
+        let mut memory = ProjectMemory::default();
+        add_memory(&mut memory, "this project uses sqlx for database access");
+        assert_eq!(memory.entries.len(), 1);
+
+        // Very similar note should be rejected
+        let added = add_memory(&mut memory, "this project uses sqlx for database");
+        assert!(!added);
+        assert_eq!(memory.entries.len(), 1);
+    }
+
+    #[test]
+    fn test_add_memory_dedup_allows_different() {
+        let mut memory = ProjectMemory::default();
+        add_memory(&mut memory, "this project uses sqlx for database access");
+        assert_eq!(memory.entries.len(), 1);
+
+        // Different note should be accepted
+        let added = add_memory(&mut memory, "tests require docker running");
+        assert!(added);
+        assert_eq!(memory.entries.len(), 2);
+    }
+
+    #[test]
+    fn test_text_similarity() {
+        // Identical strings
+        assert!((text_similarity("hello world", "hello world") - 1.0).abs() < 0.01);
+
+        // Very similar
+        let sim = text_similarity(
+            "this project uses sqlx for database",
+            "this project uses sqlx for database access",
+        );
+        assert!(
+            sim > 0.7,
+            "Similar strings should have high similarity: {sim}"
+        );
+
+        // Very different
+        let sim = text_similarity("uses sqlx", "requires docker");
+        assert!(
+            sim < 0.3,
+            "Different strings should have low similarity: {sim}"
+        );
+
+        // Empty strings
+        assert!((text_similarity("", "") - 1.0).abs() < 0.01);
     }
 
     #[test]
@@ -344,10 +453,10 @@ mod tests {
         let mut memory = load_memories_from(&path);
         assert!(memory.entries.is_empty());
 
-        // Add entries
-        add_memory(&mut memory, "first");
-        add_memory(&mut memory, "second");
-        add_memory(&mut memory, "third");
+        // Add entries (use force to bypass dedup for short strings)
+        add_memory_force(&mut memory, "first");
+        add_memory_force(&mut memory, "second");
+        add_memory_force(&mut memory, "third");
         assert_eq!(memory.entries.len(), 3);
 
         // Save

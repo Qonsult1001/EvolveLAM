@@ -521,6 +521,10 @@ pub async fn run_repl(
                 commands::handle_index();
                 continue;
             }
+            s if s == "/ast" || s.starts_with("/ast ") => {
+                commands::handle_ast(input);
+                continue;
+            }
             "/retry" => {
                 commands::handle_retry(agent, &last_input, &mut session_total, &agent_config.model)
                     .await;

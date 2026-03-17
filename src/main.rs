@@ -28,11 +28,13 @@
 //!   /search <query> Search conversation history
 //!   /spawn <task>   Spawn a subagent with fresh context
 //!   /tree [depth]   Show project directory tree
+//!   /ast <pattern>  Search code symbols (fn, struct, trait, class)
 //!   /test           Auto-detect and run project tests
 //!   /lint           Auto-detect and run project linter
 //!   /pr [number]    List open PRs, view/diff/comment/checkout a PR, or create one
 //!   /retry          Re-send the last user input
 
+mod ast;
 mod cli;
 mod commands;
 mod commands_git;
@@ -44,6 +46,7 @@ mod git;
 mod memory;
 mod prompt;
 mod repl;
+mod serve;
 
 use cli::*;
 use format::*;
@@ -681,6 +684,12 @@ async fn main() {
             },
             Err(_) => eprintln!("{DIM}  no previous session found ({session_path}){RESET}"),
         }
+    }
+
+    // --serve: start as OpenAI-compatible HTTP server for IDE integration
+    if config.serve {
+        serve::start_server(agent_config, config.port).await;
+        return;
     }
 
     // --prompt / -p: single-shot mode with a prompt argument

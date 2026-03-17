@@ -331,6 +331,8 @@ pub struct Config {
     pub auto_approve: bool,
     pub permissions: PermissionConfig,
     pub dir_restrictions: DirectoryRestrictions,
+    pub serve: bool,
+    pub port: u16,
 }
 
 /// Whether verbose output is enabled. Set once at startup.
@@ -527,6 +529,8 @@ const KNOWN_FLAGS: &[&str] = &[
     "-h",
     "--version",
     "-V",
+    "--serve",
+    "--port",
 ];
 
 /// Warn about any unrecognized flags in the arguments.
@@ -876,6 +880,7 @@ pub fn parse_args(args: &[String]) -> Option<Config> {
         "--deny",
         "--allow-dir",
         "--deny-dir",
+        "--port",
     ];
     for flag in &flags_needing_values {
         if let Some(pos) = args.iter().position(|a| a == flag) {
@@ -1161,6 +1166,17 @@ pub fn parse_args(args: &[String]) -> Option<Config> {
         }
     };
 
+    // --serve flag: start as OpenAI-compatible HTTP server for IDE integration
+    let serve = args.iter().any(|a| a == "--serve");
+
+    // --port <number>: custom port for --serve mode (default 8787)
+    let port = args
+        .iter()
+        .position(|a| a == "--port")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|s| s.parse::<u16>().ok())
+        .unwrap_or(crate::serve::DEFAULT_PORT);
+
     // --mcp <command> flags: collect all MCP server commands (repeatable)
     let mcp_servers: Vec<String> = args
         .iter()
@@ -1197,6 +1213,8 @@ pub fn parse_args(args: &[String]) -> Option<Config> {
         auto_approve,
         permissions,
         dir_restrictions,
+        serve,
+        port,
     })
 }
 

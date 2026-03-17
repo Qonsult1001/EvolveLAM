@@ -1,6 +1,7 @@
 //! Project-related command handlers: /context, /init, /health, /fix, /test, /lint,
-//! /tree, /run, /docs, /find, /index.
+//! /tree, /run, /docs, /find, /index, /ast.
 
+use crate::ast;
 use crate::cli;
 use crate::commands::auto_compact_if_needed;
 use crate::docs;
@@ -1236,4 +1237,27 @@ pub fn handle_index() {
         let formatted = format_project_index(&entries);
         println!("{DIM}{formatted}{RESET}");
     }
+}
+
+// ── /ast ──────────────────────────────────────────────────────────────
+
+/// Handle the /ast command: search for code symbols (functions, structs, traits, etc.).
+pub fn handle_ast(input: &str) {
+    let pattern = input.strip_prefix("/ast").unwrap_or("").trim();
+
+    if pattern.is_empty() {
+        println!("{DIM}  usage: /ast <pattern>");
+        println!("  Search for code symbols (functions, structs, enums, traits, classes).");
+        println!("  Supports Rust, Python, TypeScript/JavaScript, Go, C/C++.");
+        println!();
+        println!("  Examples:");
+        println!("    /ast handle          Find all symbols containing 'handle'");
+        println!("    /ast AgentConfig     Find structs/types named AgentConfig");
+        println!("    /ast run_prompt      Find the run_prompt function{RESET}\n");
+        return;
+    }
+
+    let symbols = ast::search_symbols(pattern);
+    let formatted = ast::format_symbols(&symbols, 30);
+    println!("{DIM}{formatted}{RESET}\n");
 }
