@@ -264,10 +264,7 @@ fn call_anthropic_api(
                 .get("message")
                 .and_then(|m| m.as_str())
                 .unwrap_or("Unknown error");
-            let error_type = error
-                .get("type")
-                .and_then(|t| t.as_str())
-                .unwrap_or("");
+            let error_type = error.get("type").and_then(|t| t.as_str()).unwrap_or("");
             last_err = format!("API error: {msg}");
 
             // Transient: overloaded, internal server error, rate limited
@@ -286,7 +283,10 @@ fn call_anthropic_api(
         return Ok(response);
     }
 
-    Err(format!("{last_err} (after {} attempts)", API_MAX_RETRIES + 1))
+    Err(format!(
+        "{last_err} (after {} attempts)",
+        API_MAX_RETRIES + 1
+    ))
 }
 
 /// Convert OpenAI-format messages to Anthropic format.
