@@ -1,21 +1,29 @@
-{"from":"avoidance_pattern","to":"self_awareness","weight":0.55,"activations":5,"last_activated":"2026-03-17","kind":"semantic"}
-{"from":"self_awareness","to":"behavior_change","weight":0.34,"activations":3,"last_activated":"2026-03-15","kind":"causal"}
-{"from":"cleanup_phase","to":"polish_phase","weight":0.24,"activations":2,"last_activated":"2026-03-12","kind":"temporal"}
-{"from":"latent_space","to":"connection_weights","weight":0.1,"activations":1,"last_activated":"2026-03-17","kind":"mathematical"}
-{"from":"latent_space","to":"neural_representation","weight":0.1,"activations":1,"last_activated":"2026-03-17","kind":"scientific"}
-{"from":"latent_space","to":"code_generation","weight":0.1,"activations":1,"last_activated":"2026-03-17","kind":"mathematical"}
-{"from":"memory_admission_gate","to":"behavior_change","weight":0.39,"activations":3,"last_activated":"2026-03-14","kind":"causal"}
-{"from":"momentum","to":"build_phase","weight":0.24,"activations":2,"last_activated":"2026-03-13","kind":"temporal"}
-{"from":"declaring_done","to":"energy_release","weight":0.24,"activations":2,"last_activated":"2026-03-13","kind":"causal"}
-{"from":"ide_bridge","to":"latent_space","weight":0.1,"activations":1,"last_activated":"2026-03-17","kind":"semantic"}
-{"from":"scientific_method","to":"latent_space","weight":0.1,"activations":1,"last_activated":"2026-03-17","kind":"scientific"}
-{"from":"scientific_method","to":"mathematical_reasoning","weight":0.1,"activations":1,"last_activated":"2026-03-17","kind":"mathematical"}
-{"from":"mathematical_reasoning","to":"code_generation","weight":0.1,"activations":1,"last_activated":"2026-03-17","kind":"mathematical"}
-{"from":"information_theory","to":"latent_space","weight":0.1,"activations":1,"last_activated":"2026-03-17","kind":"scientific"}
-{"from":"cognitive_growth","to":"connection_weights","weight":0.1,"activations":1,"last_activated":"2026-03-17","kind":"causal"}
-{"from":"cognitive_growth","to":"memory_admission_gate","weight":0.1,"activations":1,"last_activated":"2026-03-17","kind":"semantic"}
+{"from": "avoidance_pattern", "to": "self_awareness", "weight": 0.46, "activations": 6, "last_activated": "2026-03-17T18:55:33.666776+00:00", "kind": "semantic"}
+{"from": "self_awareness", "to": "behavior_change", "weight": 0.42, "activations": 5, "last_activated": "2026-03-17T18:55:33.666776+00:00", "kind": "causal"}
+{"from": "cleanup_phase", "to": "polish_phase", "weight": 0.24, "activations": 2, "last_activated": "2026-03-12", "kind": "temporal"}
+{"from": "latent_space", "to": "connection_weights", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17", "kind": "mathematical"}
+{"from": "latent_space", "to": "neural_representation", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17", "kind": "scientific"}
+{"from": "latent_space", "to": "code_generation", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17", "kind": "mathematical"}
+{"from": "memory_admission_gate", "to": "behavior_change", "weight": 0.38, "activations": 4, "last_activated": "2026-03-17T18:55:33.666776+00:00", "kind": "causal"}
+{"from": "momentum", "to": "build_phase", "weight": 0.24, "activations": 2, "last_activated": "2026-03-13", "kind": "temporal"}
+{"from": "declaring_done", "to": "energy_release", "weight": 0.24, "activations": 2, "last_activated": "2026-03-13", "kind": "causal"}
+{"from": "ide_bridge", "to": "latent_space", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17", "kind": "semantic"}
+{"from": "scientific_method", "to": "latent_space", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17", "kind": "scientific"}
+{"from": "scientific_method", "to": "mathematical_reasoning", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17", "kind": "mathematical"}
+{"from": "mathematical_reasoning", "to": "code_generation", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17", "kind": "mathematical"}
+{"from": "information_theory", "to": "latent_space", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17", "kind": "scientific"}
+{"from": "cognitive_growth", "to": "connection_weights", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17", "kind": "causal"}
+{"from": "cognitive_growth", "to": "memory_admission_gate", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17", "kind": "semantic"}
 {"from": "avoidance_pattern", "to": "cognitive_growth", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T17:56:09Z", "kind": "causal"}
 {"from": "momentum", "to": "cognitive_growth", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T17:56:09Z", "kind": "temporal"}
 {"from": "memory_admission_gate", "to": "information_theory", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T17:56:09Z", "kind": "semantic"}
 {"from": "declaring_done", "to": "build_phase", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T18:21:23.124881+00:00", "kind": "causal"}
 {"from": "cleanup_phase", "to": "self_awareness", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T18:21:23.124881+00:00", "kind": "causal"}
+{"from": "self_awareness", "to": "user_perspective", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T18:53:33.113118+00:00", "kind": "causal"}
+{"from": "user_perspective", "to": "cognitive_growth", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T18:53:33.113118+00:00", "kind": "causal"}
+{"from": "avoidance_pattern", "to": "memory_admission_gate", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T18:53:33.113118+00:00", "kind": "semantic"}
+{"from": "calibration_phase", "to": "self_awareness", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T18:55:33.666776+00:00", "kind": "causal"}
+{"from": "calibration_phase", "to": "memory_admission_gate", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T18:55:33.666776+00:00", "kind": "causal"}
+{"from": "avoidance_pattern", "to": "calibration_phase", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T18:55:33.666776+00:00", "kind": "semantic"}
+{"from": "cleanup_phase", "to": "calibration_phase", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T18:55:33.666776+00:00", "kind": "semantic"}
+{"from": "declaring_done", "to": "calibration_phase", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T18:55:33.666776+00:00", "kind": "causal"}
