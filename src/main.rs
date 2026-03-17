@@ -606,26 +606,52 @@ async fn main() {
     let mut api_key = config.api_key;
 
     if provider == "ide" {
-        let backend = match ide_bridge::detect_ide() {
-            Some(b) => b,
+        match ide_bridge::detect_ide() {
+            Some(ide_bridge::IdeDetection::DirectApi {
+                api_key: token,
+                proxy,
+            }) => {
+                // Found session credentials — start local bridge with Bearer auth
+                eprintln!(
+                    "{DIM}  IDE mode: using host session credentials (Bearer auth bridge){RESET}"
+                );
+                let creds = ide_bridge::SessionCreds {
+                    bearer_token: token,
+                    proxy_url: proxy,
+                };
+                match ide_bridge::start_api_bridge(creds).await {
+                    Ok(port) => {
+                        eprintln!("{DIM}  IDE bridge: listening on 127.0.0.1:{port}{RESET}");
+                        provider = "custom".to_string();
+                        base_url = Some(format!("http://127.0.0.1:{port}/v1"));
+                        api_key = "ide-bridge".to_string();
+                    }
+                    Err(e) => {
+                        eprintln!("{RED}error:{RESET} Failed to start IDE API bridge: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            Some(ide_bridge::IdeDetection::CliBackend(backend)) => {
+                // Fall back to CLI subprocess bridge
+                eprintln!("{DIM}  IDE bridge: detected {backend}, starting local proxy...{RESET}");
+                match ide_bridge::start_bridge(backend).await {
+                    Ok(port) => {
+                        eprintln!("{DIM}  IDE bridge: listening on 127.0.0.1:{port}{RESET}");
+                        provider = "custom".to_string();
+                        base_url = Some(format!("http://127.0.0.1:{port}/v1"));
+                        api_key = "ide-bridge".to_string();
+                    }
+                    Err(e) => {
+                        eprintln!("{RED}error:{RESET} Failed to start IDE bridge: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
             None => {
                 eprintln!(
-                    "{RED}error:{RESET} No IDE CLI detected. Install Claude Code (`claude`) or specify --ide-cmd."
+                    "{RED}error:{RESET} No IDE detected. Install Claude Code (`claude`) or run inside a coding agent."
                 );
-                std::process::exit(1);
-            }
-        };
-        eprintln!("{DIM}  IDE bridge: detected {backend}, starting local proxy...{RESET}");
-        match ide_bridge::start_bridge(backend).await {
-            Ok(port) => {
-                eprintln!("{DIM}  IDE bridge: listening on 127.0.0.1:{port}{RESET}");
-                // Route yoagent through the bridge
-                provider = "custom".to_string();
-                base_url = Some(format!("http://127.0.0.1:{port}/v1"));
-                api_key = "ide-bridge".to_string();
-            }
-            Err(e) => {
-                eprintln!("{RED}error:{RESET} Failed to start IDE bridge: {e}");
                 std::process::exit(1);
             }
         }
