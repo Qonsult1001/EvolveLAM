@@ -67,14 +67,14 @@ if ! command -v timeout &>/dev/null; then
     fi
 fi
 
-# Helper: run agent with the configured provider (mirrors learn.sh pattern)
+# Helper: run agent with the configured provider via stdin (handles large prompts)
 run_agent() {
     local prompt_file="$1"
     local agent_timeout="${2:-$TIMEOUT}"
     ${TIMEOUT_CMD:+$TIMEOUT_CMD "$agent_timeout"} cargo run -- \
         --provider "$PROVIDER" $MODEL_FLAG \
         --skills ./skills \
-        --prompt "$(cat "$prompt_file")" 2>&1
+        < "$prompt_file" 2>&1
 }
 
 SESSION_START_SHA=$(git rev-parse HEAD)
@@ -251,7 +251,7 @@ TEOF
         echo "    Task $TASK_NUM: verified OK"
     fi
 
-done < <(grep '^### Task' SESSION_PLAN.md | head -5)
+done <<< "$(grep '^### Task' SESSION_PLAN.md 2>/dev/null | head -5)"
 
 echo "  Implementation complete. $TASK_FAILURES/$TASK_NUM tasks had issues."
 echo ""
@@ -301,7 +301,7 @@ JEOF
     ${TIMEOUT_CMD:+$TIMEOUT_CMD 120} cargo run -- \
         --provider "$PROVIDER" $MODEL_FLAG \
         --skills ./skills \
-        --prompt "$(cat "$JOURNAL_PROMPT")" || true
+        < "$JOURNAL_PROMPT" || true
     rm -f "$JOURNAL_PROMPT"
 fi
 
@@ -323,7 +323,7 @@ REOF
     ${TIMEOUT_CMD:+$TIMEOUT_CMD 120} cargo run -- \
         --provider "$PROVIDER" $MODEL_FLAG \
         --skills ./skills \
-        --prompt "$(cat "$REFLECT_PROMPT")" || true
+        < "$REFLECT_PROMPT" || true
     rm -f "$REFLECT_PROMPT"
 fi
 
