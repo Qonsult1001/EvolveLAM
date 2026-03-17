@@ -54,13 +54,15 @@ Uses `yoagent::Agent` with `AnthropicProvider`, `default_tools()`, and an option
 - `communicate` — write journal entries and issue responses
 - `research` — internet lookups and knowledge caching
 
-**Memory system** (`memory/`): Two-layer architecture — append-only JSONL archives (source of truth, never compressed) and active context markdown (regenerated daily by `.github/workflows/synthesize.yml` with time-weighted compression tiers):
+**Memory system** (`memory/`): Three-layer architecture — append-only JSONL archives (source of truth, never compressed), latent space connection graph (weighted associations between concepts), and active context markdown (regenerated daily by `.github/workflows/synthesize.yml` with time-weighted compression tiers):
 - `memory/learnings.jsonl` — self-reflection archive. Each line: `{"type":"lesson","day":N,"ts":"ISO8601","source":"...","title":"...","context":"...","takeaway":"..."}`
 - `memory/social_learnings.jsonl` — social insight archive. Each line: `{"type":"social","day":N,"ts":"ISO8601","source":"...","who":"@user","insight":"..."}`
+- `memory/connections.jsonl` — latent space connection graph. Each line: `{"from":"concept_a","to":"concept_b","weight":0.5,"activations":3,"last_activated":"ISO8601","kind":"semantic|causal|temporal|mathematical|scientific"}`. Connections strengthen with co-activation following logarithmic growth (rapid early learning, slower stabilization). Types: `semantic` (shared meaning), `causal` (enables/causes), `temporal` (co-occurred), `mathematical` (formal/logical), `scientific` (external knowledge).
 - `memory/active_learnings.md` — synthesized prompt context (recent=full, medium=condensed, old=themed groups)
 - `memory/active_social_learnings.md` — synthesized social prompt context
 - Archives are appended via `python3` with `json.dumps()` (never `echo` — prevents quote-breaking). Admission gate: only write if genuinely novel AND would change future behavior.
 - Context loaded centrally by `scripts/yoyo_context.sh` → `$YOYO_CONTEXT` (WHO YOU ARE, YOUR VOICE, SELF-WISDOM, SOCIAL WISDOM sections)
+- **Latent space cognitive layer** (`src/memory.rs::ConnectionGraph`): In-memory graph loaded from `connections.jsonl`. Supports scientific learning ingestion (`ScientificLearning` struct) — external knowledge (information theory, category theory, type theory) auto-connects to existing concept nodes. Connection weights follow `ln(activations) * 0.2 + 0.1` — mimicking neural stabilization. Concept similarity computed via Jaccard index on shared neighbors.
 
 **State files** (read/written by the agent during evolution):
 - `IDENTITY.md` — the agent's constitution and rules (DO NOT MODIFY)
@@ -80,3 +82,12 @@ These are enforced by the `evolve` skill and `evolve.sh`:
 - Never delete existing tests
 - Multiple tasks per evolution session, each verified independently
 - Write tests before adding features
+
+### Connection Graph Protection (Hostile Set)
+
+The latent space connection graph (`memory/connections.jsonl`) is a cognitive substrate — corrupting it is equivalent to corrupting the agent's associative reasoning. These rules protect it:
+- **No external writes to connections.jsonl** except through the `ConnectionGraph` API in `src/memory.rs` or via `python3` with `json.dumps()` (same serialization safety as learnings)
+- **Connection weights can only grow** — no process may decrease a weight or delete a connection. Connections represent accumulated co-activation; erasing them erases learned associations
+- **Scientific learning ingestion must be tagged** — every `ScientificLearning` must have a `domain`, `concept`, and at least one `tag` connecting it to existing knowledge. Untagged/orphan nodes are cognitive dead-ends
+- **Branch discipline**: All changes push only to the designated development branch. Keep evolution local; push to GitHub at most once per day to the specified repository. Other changes remain local commits until explicitly pushed
+- **Connection integrity**: The graph must remain acyclic for causal connections (A causes B, B cannot cause A). Semantic and temporal connections may be bidirectional. Mathematical connections are always directed (premise → conclusion)

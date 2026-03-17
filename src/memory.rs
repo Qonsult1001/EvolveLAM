@@ -3,8 +3,25 @@
 //! Persists project-specific notes across sessions in `.yoyo/memory.json`.
 //! Each memory is a `{note, timestamp}` pair stored as a JSON array.
 //! Users can add memories with `/remember`, list with `/memories`, remove with `/forget`.
+//!
+//! ## Latent Space Connection Layer
+//!
+//! Beyond flat memory storage, this module implements a latent-space-inspired
+//! connection graph (`memory/connections.jsonl`). Every learning forms nodes;
+//! connections between them carry weights that strengthen each time both concepts
+//! co-activate (are referenced or relevant in the same context). This mimics how
+//! neural latent spaces form dense representation clusters — connections happen
+//! millions of times, building compressed mathematical understanding that can
+//! generate novel combinations.
+//!
+//! The connection graph enables:
+//! - **Associative recall**: finding related learnings by traversal, not just text search
+//! - **Concept clustering**: emergent topic groups from connection density
+//! - **Scientific learning ingestion**: new external knowledge auto-connects to existing nodes
+//! - **Cognitive growth**: connection weights strengthen over time, forming "intuition"
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// A single project memory entry.
@@ -152,6 +169,289 @@ pub fn format_memories_for_prompt(memory: &ProjectMemory) -> Option<String> {
         lines.push(format!("- {} ({})", entry.note, entry.timestamp));
     }
     Some(lines.join("\n"))
+}
+
+// ============================================================================
+// Latent Space Connection Layer
+// ============================================================================
+
+/// Path to the connections archive (append-only JSONL).
+#[allow(dead_code)]
+const CONNECTIONS_FILE: &str = "memory/connections.jsonl";
+
+/// A connection between two learning concepts in the latent space.
+/// Weights strengthen each time both concepts co-activate.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[allow(dead_code)]
+pub struct Connection {
+    /// Source node identifier (learning title or concept tag).
+    pub from: String,
+    /// Target node identifier.
+    pub to: String,
+    /// Connection weight — strengthens with co-activation (0.0 to 1.0 scale, can exceed 1.0).
+    pub weight: f64,
+    /// How many times this connection has been activated.
+    pub activations: u64,
+    /// Timestamp of last activation.
+    pub last_activated: String,
+    /// The type of connection (semantic, causal, temporal, mathematical).
+    pub kind: ConnectionKind,
+}
+
+/// Types of connections in the latent space graph.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
+pub enum ConnectionKind {
+    /// Concepts share semantic meaning (similar topics).
+    Semantic,
+    /// One concept causes or enables another.
+    Causal,
+    /// Concepts occurred near each other in time.
+    Temporal,
+    /// Mathematical or logical relationship between concepts.
+    Mathematical,
+    /// Connection formed from external scientific knowledge.
+    Scientific,
+}
+
+/// A scientific learning entry that can be ingested into the connection graph.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct ScientificLearning {
+    /// The domain (e.g., "latent_space", "information_theory", "category_theory").
+    pub domain: String,
+    /// The concept or principle.
+    pub concept: String,
+    /// How it relates to code generation or reasoning.
+    pub application: String,
+    /// Mathematical formulation if applicable (e.g., "KL_divergence(P||Q)").
+    pub formula: Option<String>,
+    /// Tags for connecting to existing learnings.
+    pub tags: Vec<String>,
+}
+
+/// The in-memory connection graph.
+#[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
+pub struct ConnectionGraph {
+    /// All connections indexed by source node.
+    pub edges: HashMap<String, Vec<Connection>>,
+    /// Node activation counts — how often each concept is referenced.
+    pub node_activations: HashMap<String, u64>,
+}
+
+#[allow(dead_code)]
+impl ConnectionGraph {
+    /// Load connections from the JSONL archive.
+    pub fn load() -> Self {
+        Self::load_from(Path::new(CONNECTIONS_FILE))
+    }
+
+    /// Load connections from a specific path (for testing).
+    pub fn load_from(path: &Path) -> Self {
+        let mut graph = ConnectionGraph::default();
+        let content = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => return graph,
+        };
+        for line in content.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            if let Ok(conn) = serde_json::from_str::<Connection>(line) {
+                let key = conn.from.clone();
+                graph.edges.entry(key).or_default().push(conn);
+            }
+        }
+        graph
+    }
+
+    /// Strengthen a connection between two concepts (or create it).
+    /// Returns the new weight after strengthening.
+    pub fn activate_connection(&mut self, from: &str, to: &str, kind: ConnectionKind) -> f64 {
+        let timestamp = current_timestamp();
+
+        // Increment node activations
+        *self.node_activations.entry(from.to_string()).or_insert(0) += 1;
+        *self.node_activations.entry(to.to_string()).or_insert(0) += 1;
+
+        let edges = self.edges.entry(from.to_string()).or_default();
+
+        // Find existing connection or create new one
+        if let Some(conn) = edges.iter_mut().find(|c| c.to == to) {
+            conn.activations += 1;
+            // Weight grows logarithmically — rapid early growth, slower later
+            // Mimics how neural connections stabilize
+            conn.weight = (conn.activations as f64).ln() * 0.2 + 0.1;
+            conn.last_activated = timestamp;
+            conn.weight
+        } else {
+            let conn = Connection {
+                from: from.to_string(),
+                to: to.to_string(),
+                weight: 0.1, // Initial connection strength
+                activations: 1,
+                last_activated: timestamp,
+                kind,
+            };
+            let w = conn.weight;
+            edges.push(conn);
+            w
+        }
+    }
+
+    /// Find the strongest connections from a given concept.
+    /// Returns connections sorted by weight (strongest first).
+    pub fn strongest_connections(&self, from: &str, limit: usize) -> Vec<&Connection> {
+        let mut conns: Vec<&Connection> = self
+            .edges
+            .get(from)
+            .map(|v| v.iter().collect())
+            .unwrap_or_default();
+        conns.sort_by(|a, b| {
+            b.weight
+                .partial_cmp(&a.weight)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        conns.truncate(limit);
+        conns
+    }
+
+    /// Find all concepts connected to a given concept (neighbors in the graph).
+    pub fn neighbors(&self, concept: &str) -> Vec<String> {
+        let mut result = Vec::new();
+        if let Some(edges) = self.edges.get(concept) {
+            for conn in edges {
+                result.push(conn.to.clone());
+            }
+        }
+        // Also find reverse connections
+        for (source, edges) in &self.edges {
+            for conn in edges {
+                if conn.to == concept && !result.contains(source) {
+                    result.push(source.clone());
+                }
+            }
+        }
+        result
+    }
+
+    /// Compute concept similarity using shared connections (Jaccard index).
+    /// Two concepts are similar if they connect to the same things.
+    pub fn concept_similarity(&self, a: &str, b: &str) -> f64 {
+        let neighbors_a: std::collections::HashSet<String> =
+            self.neighbors(a).into_iter().collect();
+        let neighbors_b: std::collections::HashSet<String> =
+            self.neighbors(b).into_iter().collect();
+
+        if neighbors_a.is_empty() && neighbors_b.is_empty() {
+            return 0.0;
+        }
+
+        let intersection = neighbors_a.intersection(&neighbors_b).count();
+        let union = neighbors_a.union(&neighbors_b).count();
+
+        if union == 0 {
+            0.0
+        } else {
+            intersection as f64 / union as f64
+        }
+    }
+
+    /// Save the entire graph to the JSONL archive.
+    pub fn save(&self) -> Result<(), String> {
+        self.save_to(Path::new(CONNECTIONS_FILE))
+    }
+
+    /// Save the entire graph to a specific path (for testing).
+    pub fn save_to(&self, path: &Path) -> Result<(), String> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create directory: {e}"))?;
+        }
+        let mut lines = Vec::new();
+        for edges in self.edges.values() {
+            for conn in edges {
+                let json =
+                    serde_json::to_string(conn).map_err(|e| format!("Serialization error: {e}"))?;
+                lines.push(json);
+            }
+        }
+        std::fs::write(path, lines.join("\n") + "\n")
+            .map_err(|e| format!("Failed to write {}: {e}", path.display()))
+    }
+
+    /// Ingest a scientific learning: create a node and connect it to related concepts.
+    /// Returns the number of new connections formed.
+    pub fn ingest_scientific_learning(&mut self, learning: &ScientificLearning) -> usize {
+        let node_name = format!("{}:{}", learning.domain, learning.concept);
+        let mut connections_formed = 0;
+
+        // Connect to all tagged concepts
+        for tag in &learning.tags {
+            self.activate_connection(&node_name, tag, ConnectionKind::Scientific);
+            connections_formed += 1;
+        }
+
+        // If there's a mathematical formula, connect with Mathematical kind
+        if let Some(ref formula) = learning.formula {
+            let formula_node = format!("formula:{}", formula);
+            self.activate_connection(&node_name, &formula_node, ConnectionKind::Mathematical);
+            connections_formed += 1;
+        }
+
+        connections_formed
+    }
+
+    /// Get the total number of connections in the graph.
+    pub fn connection_count(&self) -> usize {
+        self.edges.values().map(|v| v.len()).sum()
+    }
+
+    /// Get the total number of unique concepts (nodes) in the graph.
+    pub fn node_count(&self) -> usize {
+        let mut nodes: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        for (source, edges) in &self.edges {
+            nodes.insert(source);
+            for conn in edges {
+                nodes.insert(&conn.to);
+            }
+        }
+        nodes.len()
+    }
+
+    /// Format the connection graph summary for inclusion in prompts.
+    pub fn format_for_prompt(&self) -> Option<String> {
+        if self.edges.is_empty() {
+            return None;
+        }
+        let mut lines = Vec::new();
+        lines.push("## Latent Space Connections".to_string());
+        lines.push(format!(
+            "Nodes: {} | Connections: {} | Total activations: {}",
+            self.node_count(),
+            self.connection_count(),
+            self.node_activations.values().sum::<u64>()
+        ));
+        lines.push(String::new());
+
+        // Show strongest connections across the whole graph
+        let mut all_conns: Vec<&Connection> = self.edges.values().flat_map(|v| v.iter()).collect();
+        all_conns.sort_by(|a, b| {
+            b.weight
+                .partial_cmp(&a.weight)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        for conn in all_conns.iter().take(10) {
+            lines.push(format!(
+                "- {} → {} (w:{:.2}, activated:{}x, {:?})",
+                conn.from, conn.to, conn.weight, conn.activations, conn.kind
+            ));
+        }
+        Some(lines.join("\n"))
+    }
 }
 
 /// Get the current timestamp in a human-readable format.
@@ -443,6 +743,175 @@ mod tests {
         let path = memory_file_path();
         assert!(path.to_string_lossy().contains(".yoyo"));
         assert!(path.to_string_lossy().contains("memory.json"));
+    }
+
+    // ====================================================================
+    // Latent Space Connection Graph Tests
+    // ====================================================================
+
+    #[test]
+    fn test_connection_graph_empty() {
+        let graph = ConnectionGraph::default();
+        assert_eq!(graph.connection_count(), 0);
+        assert_eq!(graph.node_count(), 0);
+        assert!(graph.format_for_prompt().is_none());
+    }
+
+    #[test]
+    fn test_activate_connection_creates_new() {
+        let mut graph = ConnectionGraph::default();
+        let weight =
+            graph.activate_connection("avoidance", "self_awareness", ConnectionKind::Semantic);
+        assert!((weight - 0.1).abs() < 0.01);
+        assert_eq!(graph.connection_count(), 1);
+        assert_eq!(graph.node_count(), 2);
+    }
+
+    #[test]
+    fn test_activate_connection_strengthens() {
+        let mut graph = ConnectionGraph::default();
+        graph.activate_connection("avoidance", "self_awareness", ConnectionKind::Semantic);
+        let w2 = graph.activate_connection("avoidance", "self_awareness", ConnectionKind::Semantic);
+        // After 2 activations: ln(2) * 0.2 + 0.1 ≈ 0.239
+        assert!(w2 > 0.1, "Weight should increase: {w2}");
+        assert_eq!(graph.connection_count(), 1); // Still one connection
+    }
+
+    #[test]
+    fn test_activate_connection_logarithmic_growth() {
+        let mut graph = ConnectionGraph::default();
+        let mut prev_weight = 0.0;
+        for i in 0..20 {
+            let w = graph.activate_connection("a", "b", ConnectionKind::Mathematical);
+            if i > 0 {
+                assert!(w > prev_weight, "Weight should grow: {w} > {prev_weight}");
+            }
+            prev_weight = w;
+        }
+        // After 20 activations: ln(20) * 0.2 + 0.1 ≈ 0.699
+        assert!(
+            prev_weight < 1.0,
+            "Growth should be bounded-ish: {prev_weight}"
+        );
+    }
+
+    #[test]
+    fn test_strongest_connections() {
+        let mut graph = ConnectionGraph::default();
+        graph.activate_connection("core", "a", ConnectionKind::Semantic);
+        // Activate b more times to make it stronger
+        for _ in 0..5 {
+            graph.activate_connection("core", "b", ConnectionKind::Causal);
+        }
+        graph.activate_connection("core", "c", ConnectionKind::Temporal);
+
+        let strongest = graph.strongest_connections("core", 2);
+        assert_eq!(strongest.len(), 2);
+        assert_eq!(strongest[0].to, "b"); // b is strongest (5 activations)
+    }
+
+    #[test]
+    fn test_neighbors() {
+        let mut graph = ConnectionGraph::default();
+        graph.activate_connection("a", "b", ConnectionKind::Semantic);
+        graph.activate_connection("a", "c", ConnectionKind::Causal);
+        graph.activate_connection("d", "a", ConnectionKind::Temporal); // Reverse
+
+        let n = graph.neighbors("a");
+        assert!(n.contains(&"b".to_string()));
+        assert!(n.contains(&"c".to_string()));
+        assert!(n.contains(&"d".to_string())); // Found via reverse lookup
+    }
+
+    #[test]
+    fn test_concept_similarity() {
+        let mut graph = ConnectionGraph::default();
+        // a and b both connect to c and d
+        graph.activate_connection("a", "c", ConnectionKind::Semantic);
+        graph.activate_connection("a", "d", ConnectionKind::Semantic);
+        graph.activate_connection("b", "c", ConnectionKind::Semantic);
+        graph.activate_connection("b", "d", ConnectionKind::Semantic);
+        // a also connects to e (not shared)
+        graph.activate_connection("a", "e", ConnectionKind::Semantic);
+
+        let sim = graph.concept_similarity("a", "b");
+        assert!(
+            sim > 0.5,
+            "Similar concepts should have high similarity: {sim}"
+        );
+
+        let sim_unrelated = graph.concept_similarity("a", "z");
+        assert!(sim_unrelated < 0.01, "Unrelated concepts: {sim_unrelated}");
+    }
+
+    #[test]
+    fn test_ingest_scientific_learning() {
+        let mut graph = ConnectionGraph::default();
+        let learning = ScientificLearning {
+            domain: "information_theory".to_string(),
+            concept: "KL_divergence".to_string(),
+            application: "Measures how one distribution diverges from another".to_string(),
+            formula: Some("sum(P(x) * log(P(x)/Q(x)))".to_string()),
+            tags: vec!["probability".to_string(), "optimization".to_string()],
+        };
+        let formed = graph.ingest_scientific_learning(&learning);
+        assert_eq!(formed, 3); // 2 tags + 1 formula
+        assert!(graph.node_count() >= 4); // concept + 2 tags + 1 formula
+    }
+
+    #[test]
+    fn test_connection_graph_save_and_load() {
+        let dir = std::env::temp_dir().join("yoyo_test_connections");
+        let _ = fs::remove_dir_all(&dir);
+        let path = dir.join("connections.jsonl");
+
+        let mut graph = ConnectionGraph::default();
+        graph.activate_connection("memory", "learning", ConnectionKind::Semantic);
+        graph.activate_connection("memory", "persistence", ConnectionKind::Causal);
+        for _ in 0..3 {
+            graph.activate_connection("latent_space", "connections", ConnectionKind::Mathematical);
+        }
+
+        graph.save_to(&path).unwrap();
+
+        let loaded = ConnectionGraph::load_from(&path);
+        assert_eq!(loaded.connection_count(), 3);
+
+        // Verify the strengthened connection loaded correctly
+        let strong = loaded.strongest_connections("latent_space", 1);
+        assert_eq!(strong.len(), 1);
+        assert_eq!(strong[0].to, "connections");
+        assert_eq!(strong[0].activations, 3);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_format_for_prompt() {
+        let mut graph = ConnectionGraph::default();
+        graph.activate_connection("concept_a", "concept_b", ConnectionKind::Scientific);
+        let prompt = graph.format_for_prompt();
+        assert!(prompt.is_some());
+        let text = prompt.unwrap();
+        assert!(text.contains("Latent Space Connections"));
+        assert!(text.contains("concept_a"));
+        assert!(text.contains("concept_b"));
+    }
+
+    #[test]
+    fn test_connection_kind_serialization() {
+        let conn = Connection {
+            from: "a".to_string(),
+            to: "b".to_string(),
+            weight: 0.5,
+            activations: 3,
+            last_activated: "2026-03-17 12:00".to_string(),
+            kind: ConnectionKind::Mathematical,
+        };
+        let json = serde_json::to_string(&conn).unwrap();
+        assert!(json.contains("mathematical"));
+        let parsed: Connection = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.kind, ConnectionKind::Mathematical);
     }
 
     #[test]
