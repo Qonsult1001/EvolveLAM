@@ -14,3 +14,6 @@
 {"from":"information_theory","to":"latent_space","weight":0.1,"activations":1,"last_activated":"2026-03-17","kind":"scientific"}
 {"from":"cognitive_growth","to":"connection_weights","weight":0.1,"activations":1,"last_activated":"2026-03-17","kind":"causal"}
 {"from":"cognitive_growth","to":"memory_admission_gate","weight":0.1,"activations":1,"last_activated":"2026-03-17","kind":"semantic"}
+{"from": "avoidance_pattern", "to": "cognitive_growth", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T17:56:09Z", "kind": "causal"}
+{"from": "momentum", "to": "cognitive_growth", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T17:56:09Z", "kind": "temporal"}
+{"from": "memory_admission_gate", "to": "information_theory", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T17:56:09Z", "kind": "semantic"}
