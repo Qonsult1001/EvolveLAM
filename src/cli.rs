@@ -1035,6 +1035,13 @@ pub fn parse_args(args: &[String]) -> Option<Config> {
         system_prompt.push_str(&project_context);
     }
 
+    // Append latent space connections if available
+    let connection_graph = crate::memory::ConnectionGraph::load();
+    if let Some(connections_prompt) = connection_graph.format_for_prompt() {
+        system_prompt.push_str("\n\n");
+        system_prompt.push_str(&connections_prompt);
+    }
+
     // --thinking <level> enables extended thinking (CLI overrides config file)
     let thinking = args
         .iter()
