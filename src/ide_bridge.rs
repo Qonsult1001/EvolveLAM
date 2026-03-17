@@ -143,9 +143,17 @@ pub fn run_ide_prompt(backend: &IdeBackend, prompt: &str) -> Result<String, Stri
     }
 }
 
+/// Maximum number of retries for transient API errors (500, 529, overloaded).
+const API_MAX_RETRIES: u32 = 3;
+/// Base delay in milliseconds for exponential backoff between retries.
+const API_RETRY_BASE_MS: u64 = 2000;
+/// Curl timeout in seconds for a single API call.
+const API_TIMEOUT_SECS: u32 = 120;
+
 /// Call the Anthropic Messages API directly using the host's session credentials.
 /// Takes the full OpenAI-format request, converts to Anthropic format, and returns
 /// the raw Anthropic response JSON (including tool_use blocks).
+/// Retries transient errors (500, 529, overloaded) with exponential backoff.
 fn call_anthropic_api(
     creds: &SessionCreds,
     openai_request: &serde_json::Value,
@@ -186,47 +194,99 @@ fn call_anthropic_api(
         }
     }
 
-    let mut cmd = std::process::Command::new("curl");
-    cmd.args([
-        "-s",
-        "https://api.anthropic.com/v1/messages",
-        "-H",
-        "content-type: application/json",
-        "-H",
-        &format!("Authorization: Bearer {}", creds.bearer_token),
-        "-H",
-        "anthropic-version: 2023-06-01",
-        "-d",
-        &serde_json::to_string(&body).unwrap_or_default(),
-    ]);
+    let body_str = serde_json::to_string(&body).unwrap_or_default();
+    let timeout_str = API_TIMEOUT_SECS.to_string();
+    let auth_header = format!("Authorization: Bearer {}", creds.bearer_token);
+    let mut last_err = String::new();
 
-    if let Some(ref proxy) = creds.proxy_url {
-        cmd.args(["-x", proxy]);
+    for attempt in 0..=API_MAX_RETRIES {
+        if attempt > 0 {
+            let delay_ms = API_RETRY_BASE_MS * (1 << (attempt - 1));
+            eprintln!(
+                "  IDE bridge: retrying API call (attempt {}/{}, waiting {}ms)",
+                attempt + 1,
+                API_MAX_RETRIES + 1,
+                delay_ms
+            );
+            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+        }
+
+        let mut cmd = std::process::Command::new("curl");
+        cmd.args([
+            "-s",
+            "--max-time",
+            &timeout_str,
+            "https://api.anthropic.com/v1/messages",
+            "-H",
+            "content-type: application/json",
+            "-H",
+            &auth_header,
+            "-H",
+            "anthropic-version: 2023-06-01",
+            "-d",
+            &body_str,
+        ]);
+
+        if let Some(ref proxy) = creds.proxy_url {
+            cmd.args(["-x", proxy]);
+        }
+
+        let output = match cmd.output() {
+            Ok(o) => o,
+            Err(e) => {
+                last_err = format!("Failed to call Anthropic API: {e}");
+                continue;
+            }
+        };
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            last_err = format!("curl failed: {stderr}");
+            // Curl timeout (exit code 28) is retryable
+            if output.status.code() == Some(28) {
+                continue;
+            }
+            return Err(last_err);
+        }
+
+        let response_str = String::from_utf8_lossy(&output.stdout);
+        let response: serde_json::Value = match serde_json::from_str(&response_str) {
+            Ok(v) => v,
+            Err(e) => {
+                last_err = format!("JSON parse error: {e}");
+                continue;
+            }
+        };
+
+        // Check for API error — retry on transient errors
+        if let Some(error) = response.get("error") {
+            let msg = error
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("Unknown error");
+            let error_type = error
+                .get("type")
+                .and_then(|t| t.as_str())
+                .unwrap_or("");
+            last_err = format!("API error: {msg}");
+
+            // Transient: overloaded, internal server error, rate limited
+            if error_type == "overloaded_error"
+                || error_type == "api_error"
+                || msg.contains("overloaded")
+                || msg.contains("Internal server error")
+                || msg.contains("529")
+            {
+                continue;
+            }
+            // Non-transient error (auth, invalid request, etc) — don't retry
+            return Err(last_err);
+        }
+
+        return Ok(response);
     }
 
-    let output = cmd
-        .output()
-        .map_err(|e| format!("Failed to call Anthropic API: {e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("curl failed: {stderr}"));
-    }
-
-    let response_str = String::from_utf8_lossy(&output.stdout);
-    let response: serde_json::Value =
-        serde_json::from_str(&response_str).map_err(|e| format!("JSON parse error: {e}"))?;
-
-    // Check for API error
-    if let Some(error) = response.get("error") {
-        let msg = error
-            .get("message")
-            .and_then(|m| m.as_str())
-            .unwrap_or("Unknown error");
-        return Err(format!("API error: {msg}"));
-    }
-
-    Ok(response)
+    Err(format!("{last_err} (after {} attempts)", API_MAX_RETRIES + 1))
 }
 
 /// Convert OpenAI-format messages to Anthropic format.
