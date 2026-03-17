@@ -322,19 +322,51 @@ fn openai_to_anthropic_messages(request: &serde_json::Value) -> (String, Vec<ser
             }
             "tool" => {
                 // OpenAI tool result → Anthropic tool_result
+                // Anthropic requires all tool_results in a single user message,
+                // so merge consecutive tool results into the previous user message
+                // if it already contains tool_result blocks.
                 let tool_call_id = msg
                     .get("tool_call_id")
                     .and_then(|i| i.as_str())
                     .unwrap_or("");
                 let content = msg.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                anthropic_msgs.push(serde_json::json!({
-                    "role": "user",
-                    "content": [{
-                        "type": "tool_result",
-                        "tool_use_id": tool_call_id,
-                        "content": content,
-                    }],
-                }));
+                let tool_result_block = serde_json::json!({
+                    "type": "tool_result",
+                    "tool_use_id": tool_call_id,
+                    "content": content,
+                });
+
+                // Check if the last message is already a user message with tool_results
+                let merged = if let Some(last) = anthropic_msgs.last_mut() {
+                    if last.get("role").and_then(|r| r.as_str()) == Some("user") {
+                        if let Some(arr) = last.get_mut("content").and_then(|c| c.as_array_mut()) {
+                            if arr
+                                .first()
+                                .and_then(|b| b.get("type"))
+                                .and_then(|t| t.as_str())
+                                == Some("tool_result")
+                            {
+                                arr.push(tool_result_block.clone());
+                                true
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+
+                if !merged {
+                    anthropic_msgs.push(serde_json::json!({
+                        "role": "user",
+                        "content": [tool_result_block],
+                    }));
+                }
             }
             _ => {}
         }
@@ -637,8 +669,9 @@ async fn send_anthropic_as_openai_sse(
     // Collect text and tool_use blocks
     let mut text_parts: Vec<String> = Vec::new();
     let mut tool_calls: Vec<serde_json::Value> = Vec::new();
+    let mut tool_call_index: usize = 0;
 
-    for (idx, block) in content.iter().enumerate() {
+    for block in &content {
         let block_type = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
         match block_type {
             "text" => {
@@ -651,7 +684,7 @@ async fn send_anthropic_as_openai_sse(
                 let name = block.get("name").and_then(|n| n.as_str()).unwrap_or("");
                 let input = block.get("input").cloned().unwrap_or(serde_json::json!({}));
                 tool_calls.push(serde_json::json!({
-                    "index": idx,
+                    "index": tool_call_index,
                     "id": tc_id,
                     "type": "function",
                     "function": {
@@ -659,6 +692,7 @@ async fn send_anthropic_as_openai_sse(
                         "arguments": serde_json::to_string(&input).unwrap_or_default(),
                     }
                 }));
+                tool_call_index += 1;
             }
             _ => {}
         }
@@ -962,6 +996,37 @@ mod tests {
         assert_eq!(content[0]["type"], "tool_result");
         assert_eq!(content[0]["tool_use_id"], "call_123");
         assert_eq!(content[0]["content"], "file1.rs\nfile2.rs");
+    }
+
+    #[test]
+    fn test_openai_to_anthropic_multiple_tool_results_merged() {
+        // Multiple consecutive tool results should be merged into one user message
+        let req = serde_json::json!({
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [
+                        {"id": "call_1", "type": "function", "function": {"name": "bash", "arguments": "{\"command\":\"ls\"}"}},
+                        {"id": "call_2", "type": "function", "function": {"name": "read_file", "arguments": "{\"file_path\":\"test.rs\"}"}}
+                    ]
+                },
+                {"role": "tool", "tool_call_id": "call_1", "content": "file1\nfile2"},
+                {"role": "tool", "tool_call_id": "call_2", "content": "fn main() {}"}
+            ]
+        });
+        let (_, msgs) = openai_to_anthropic_messages(&req);
+        // Should be 2 messages: assistant + one merged user message
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0]["role"], "assistant");
+        assert_eq!(msgs[1]["role"], "user");
+        let content = msgs[1]["content"].as_array().unwrap();
+        // Both tool_results in one user message
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"], "tool_result");
+        assert_eq!(content[0]["tool_use_id"], "call_1");
+        assert_eq!(content[1]["type"], "tool_result");
+        assert_eq!(content[1]["tool_use_id"], "call_2");
     }
 
     #[test]
