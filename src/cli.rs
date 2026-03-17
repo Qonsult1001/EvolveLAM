@@ -30,6 +30,7 @@ pub const KNOWN_PROVIDERS: &[&str] = &[
     "mistral",
     "cerebras",
     "custom",
+    "ide",
 ];
 
 /// Permission configuration for tool execution.
@@ -958,8 +959,9 @@ pub fn parse_args(args: &[String]) -> Option<Config> {
                         _ => match file_config.get("api_key").cloned() {
                             Some(key) if !key.is_empty() => key,
                             _ => {
-                                // For local/ollama providers, API key is optional
-                                if provider == "ollama" || provider == "custom" {
+                                // For local/ollama/ide providers, API key is optional
+                                if provider == "ollama" || provider == "custom" || provider == "ide"
+                                {
                                     "not-needed".to_string()
                                 } else {
                                     let env_hint = provider_env_var.unwrap_or("ANTHROPIC_API_KEY");

@@ -43,6 +43,7 @@ mod commands_session;
 mod docs;
 mod format;
 mod git;
+mod ide_bridge;
 mod memory;
 mod prompt;
 mod repl;
@@ -599,11 +600,42 @@ async fn main() {
     let is_interactive = io::stdin().is_terminal() && config.prompt_arg.is_none();
     let auto_approve = config.auto_approve || !is_interactive;
 
+    // If --provider ide: detect IDE CLI and start local bridge
+    let mut provider = config.provider;
+    let mut base_url = config.base_url;
+    let mut api_key = config.api_key;
+
+    if provider == "ide" {
+        let backend = match ide_bridge::detect_ide() {
+            Some(b) => b,
+            None => {
+                eprintln!(
+                    "{RED}error:{RESET} No IDE CLI detected. Install Claude Code (`claude`) or specify --ide-cmd."
+                );
+                std::process::exit(1);
+            }
+        };
+        eprintln!("{DIM}  IDE bridge: detected {backend}, starting local proxy...{RESET}");
+        match ide_bridge::start_bridge(backend).await {
+            Ok(port) => {
+                eprintln!("{DIM}  IDE bridge: listening on 127.0.0.1:{port}{RESET}");
+                // Route yoagent through the bridge
+                provider = "custom".to_string();
+                base_url = Some(format!("http://127.0.0.1:{port}/v1"));
+                api_key = "ide-bridge".to_string();
+            }
+            Err(e) => {
+                eprintln!("{RED}error:{RESET} Failed to start IDE bridge: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
     let mut agent_config = AgentConfig {
         model: config.model,
-        api_key: config.api_key,
-        provider: config.provider,
-        base_url: config.base_url,
+        api_key,
+        provider,
+        base_url,
         skills: config.skills,
         system_prompt: config.system_prompt,
         thinking: config.thinking,
