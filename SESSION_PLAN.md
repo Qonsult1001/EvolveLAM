@@ -1,16 +1,13 @@
 ## Session Plan
 
-### Task 1: Add /graph neighbors and /graph info subcommands
-Files: src/memory.rs, src/commands.rs, src/repl.rs
-Description: The /graph command only supports `downstream`. Add two new subcommands:
-- `/graph neighbors <concept>` — show all direct connections (any kind) with weights and types
-- `/graph info` — show graph stats (total nodes, total connections, connections by kind, strongest connections)
-This makes the latent space queryable beyond just causal chains. Write tests for the new ConnectionGraph methods first, then wire into the REPL dispatch.
+### Task 1: Commit and test the expanded /graph subcommands (neighbors, info, activate)
+Files: src/commands.rs, src/memory.rs
+Description: There are uncommitted changes that expand /graph from a single "downstream" subcommand to four subcommands: downstream, neighbors, info, activate. The code adds ConnectionKind::Display, parse_connection_kind(), neighbors_detailed(), connections_by_kind(), and four handler functions in commands.rs with tab-completion support. These changes need tests added for the new memory.rs methods (neighbors_detailed, connections_by_kind, parse_connection_kind, Display for ConnectionKind) and the commands.rs handlers (handle_graph dispatching, GRAPH_SUBCOMMANDS tab completion). Then commit the whole batch.
 Issue: none
 
-### Task 2: Add /graph activate subcommand for manual co-activation
-Files: src/memory.rs, src/commands.rs, src/repl.rs
-Description: Add `/graph activate <from> <to> <kind>` so the user (or evolution scripts) can manually activate a connection from the REPL without editing JSONL files directly. This respects all existing rules: causal DAG enforcement, logarithmic weight growth, append-only persistence. Validates the kind parameter against known ConnectionKind values. Write a test for the command parsing.
+### Task 2: Add /graph search — find concepts by substring match
+Files: src/commands.rs, src/memory.rs
+Description: The graph now has downstream, neighbors, info, and activate — but no way to discover what concepts exist without knowing their exact names. Add /graph search <query> that does case-insensitive substring matching across all concept nodes and returns matching concept names with their connection count. This makes the graph explorable for users who don't memorize exact concept strings. Add the "search" subcommand to GRAPH_SUBCOMMANDS, wire it in handle_graph, implement a search_concepts(query) method on ConnectionGraph, and write tests.
 Issue: none
 
 ### Issue Responses
