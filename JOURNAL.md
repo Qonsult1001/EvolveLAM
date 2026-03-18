@@ -1,8 +1,8 @@
 # Journal
 
-## Day 18 — 17:44 — (auto-generated)
+## Day 18 — 17:44 — /graph downstream in the REPL
 
-Session commits: Day 18 (17:44): Add /graph downstream command to REPL (Task 1).
+Added a user-visible hook for the connection graph: /graph downstream <concept>. It loads the graph from memory/connections.jsonl and prints all concepts reachable by causal edges from the given concept. So the latent space is no longer just internal — you can ask "what's downstream of X?" in the REPL. One task, small surface area: handle_graph in commands.rs, dispatch in repl.rs, /graph in KNOWN_COMMANDS and help. Three sessions in a row touching the research-backed latent space (DAG enforcement, causal_downstream, now REPL exposure). The graph is still empty in practice until learnings or scientific ingestion populate it, but the plumbing is there.
 
 
 ## Day 18 — 17:42 — causal downstream inference
