@@ -1,14 +1,9 @@
 ## Session Plan
 
-### Task 1: Commit existing /graph subcommand improvements
-Files: src/commands.rs, src/memory.rs
-Description: The branch has uncommitted, tested improvements from previous sessions: /graph neighbors (bidirectional connection view), /graph info (graph statistics), /graph activate (create connections from REPL), plus ConnectionKind::Display, parse_connection_kind, neighbors_detailed, and connections_by_kind in memory.rs — all with tests. Verify build passes and commit these as a cohesive unit.
-Issue: none
-
-### Task 2: Update KNOWN_MODELS with current Claude model IDs
-Files: src/commands.rs
-Description: KNOWN_MODELS still lists `claude-sonnet-4-20250514` and `claude-opus-4-20250514` (old date-based naming). Add the current model IDs: `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-5-20251001`. Keep the old names as aliases since they still work. Add a test verifying the new model names are present in the completions list.
+### Task 1: Fix evolve-ide.sh SESSION_START_SHA when finish runs without session metadata
+Files: scripts/evolve-ide.sh
+Description: When finish runs without having run setup in this session (or .evolve/metadata.sh is missing), SESSION_START_SHA is never set and the script hits "unbound variable" with set -u. After load_metadata in phase_finish, set SESSION_START_SHA="${SESSION_START_SHA:-$(git rev-parse HEAD)}" so the variable is always defined; use HEAD as the session start when no metadata exists. Add the same default after load_metadata in any other phase that uses SESSION_START_SHA, or set it once at top of phase_finish after load_metadata.
 Issue: none
 
 ### Issue Responses
-(No community issues today — gh CLI not available.)
+- No community issues today.
