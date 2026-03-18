@@ -124,7 +124,9 @@ cargo install --path .
 cargo install yoyo
 ``` -->
 
-### Run
+### Run as a coding assistant
+
+Use yoyo like any CLI coding tool — it works with any LLM provider:
 
 ```bash
 # Interactive REPL (default)
@@ -154,6 +156,25 @@ yoyo -p "generate a config" -o config.toml
 # Auto-approve all tool use
 yoyo --yes
 ```
+
+### Run self-evolution from your IDE
+
+To trigger yoyo's self-improvement loop from inside any IDE agent (Claude Code,
+Cursor, Windsurf, etc.) — no API key needed, the IDE provides the LLM:
+
+```bash
+./scripts/evolve-ide.sh setup        # 1. Build check, fetch issues → .evolve/plan_prompt.md
+                                     # 2. Read .evolve/plan_prompt.md → create SESSION_PLAN.md
+./scripts/evolve-ide.sh next-task    # 3. Get next task → .evolve/task_prompt.md
+                                     # 4. Read .evolve/task_prompt.md → implement + commit
+./scripts/evolve-ide.sh verify-task  # 5. Verification gate (build, tests, protected files)
+                                     # 6. Repeat 3-5 until next-task says "done"
+./scripts/evolve-ide.sh finish       # 7. Journal, issue responses, tag, push
+```
+
+Or get started with `./scripts/evolve-ide.sh help`.
+
+See [How It Evolves](#how-it-evolves) for the full picture of CI vs IDE modes.
 
 ### Configure
 
