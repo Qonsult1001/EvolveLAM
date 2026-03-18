@@ -168,9 +168,17 @@ Cursor, Windsurf, etc.) — no API key needed, the IDE provides the LLM:
 # Then read .evolve/runbook.md and follow it end-to-end
 ```
 
-The `all` command runs build checks, fetches issues, and outputs a single runbook
-(`.evolve/runbook.md`) containing the plan prompt and full task loop instructions.
-The IDE agent reads it once and executes the entire evolution autonomously.
+The `all` command does the same thing as `evolve.sh` but uses your IDE as the brain:
+
+1. **Setup** (automatic) — verifies build, checks CI status, fetches GitHub issues
+   (community, self-filed, help-wanted), scans for pending replies, loads identity context
+2. **Read source** — IDE reads `src/*.rs`, `JOURNAL.md`, `ISSUES_TODAY.md`, learnings
+3. **Plan** — IDE creates `SESSION_PLAN.md` with tasks + issue responses
+4. **Task loop** — for each task: `next-task` → implement → `verify-task` (auto-reverts on failure)
+5. **Finish** — posts replies to GitHub issues, verifies final build, writes journal, tags, pushes
+
+The full pipeline is written to `.evolve/runbook.md` — the IDE reads it once and
+executes everything autonomously.
 
 For manual step-by-step control:
 
@@ -277,20 +285,32 @@ Every 4-8 hours, yoyo wakes up and:
 
 When you run yoyo's evolution from inside an IDE agent (Claude Code, Cursor, etc.),
 there's no need for the yoyo binary as a middleman — the IDE agent already has all
-the tools. `evolve-ide.sh` handles all bash infrastructure (build checks, CI status,
-issue fetching, verification gates, rollbacks, issue posting, tagging, pushing) and
-outputs structured prompts for the IDE agent to execute.
+the tools. `evolve-ide.sh` handles all bash infrastructure and outputs structured
+prompts for the IDE agent to execute.
 
 ```bash
-# Autonomous — one command to start, then follow the runbook
 ./scripts/evolve-ide.sh all
-# → Runs setup, then writes .evolve/runbook.md
-# → Read .evolve/runbook.md and follow it end-to-end
-# → The runbook contains the plan prompt + full task loop + finish instructions
+# Then: read .evolve/runbook.md and follow it end-to-end
 ```
 
-The runbook drives the IDE agent through the same pipeline as CI mode:
-plan → implement each task → verify → journal → issue responses → push.
+The `all` command runs setup and writes a single runbook (`.evolve/runbook.md`)
+that drives the IDE agent through the full evolution pipeline:
+
+```
+The IDE agent wakes up and:
+    → Verifies build passes (cargo build + cargo test)
+    → Checks previous CI status for failures
+    → Fetches GitHub issues (community, self-filed, help-wanted)
+    → Scans for pending replies on previously touched issues
+    → Reads its own source code (src/*.rs)
+    → Reads JOURNAL.md and ISSUES_TODAY.md
+    → Plans what to improve → SESSION_PLAN.md
+    → Implements each task, runs tests
+    → If tests pass → commit. If not → auto-revert + file issue.
+    → Replies to GitHub issues as 🐙 yoyo-evolve
+    → Writes journal entry and reflections
+    → Tags the known-good state and pushes
+```
 
 For manual step-by-step control, use individual subcommands:
 
