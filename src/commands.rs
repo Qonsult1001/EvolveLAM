@@ -59,6 +59,7 @@ pub const KNOWN_COMMANDS: &[&str] = &[
     "/marks",
     "/remember",
     "/memories",
+    "/graph",
     "/provider",
     "/ast",
 ];
@@ -232,6 +233,7 @@ pub fn help_text() -> String {
         "  /remember <note>   Save a project-specific memory (persists across sessions)\n",
     );
     out.push_str("  /memories          List project-specific memories for this directory\n");
+    out.push_str("  /graph downstream <concept>  Show causal downstream from connection graph\n");
     out.push_str("  /forget <n>        Remove a project memory by index\n");
     out.push('\n');
 
@@ -612,6 +614,38 @@ pub fn handle_forget(input: &str) {
                 memory.entries.len()
             );
         }
+    }
+}
+
+// ── /graph ───────────────────────────────────────────────────────────────
+
+/// Handle /graph downstream <concept> — show causal downstream of a concept from the connection graph.
+pub fn handle_graph(input: &str) {
+    let rest = input.strip_prefix("/graph").unwrap_or("").trim();
+    if rest.is_empty() {
+        println!("{DIM}  usage: /graph downstream <concept>");
+        println!("  Show concepts reachable by causal edges from <concept>.{RESET}\n");
+        return;
+    }
+    let Some(args) = rest.strip_prefix("downstream") else {
+        println!("{DIM}  usage: /graph downstream <concept>{RESET}\n");
+        return;
+    };
+    let concept = args.trim();
+    if concept.is_empty() {
+        println!("{DIM}  usage: /graph downstream <concept>{RESET}\n");
+        return;
+    }
+    let graph = crate::memory::ConnectionGraph::load();
+    let down = graph.causal_downstream(concept);
+    if down.is_empty() {
+        println!("{DIM}  No causal downstream for \"{concept}\".{RESET}\n");
+    } else {
+        println!("  Causal downstream of \"{concept}\":");
+        for c in &down {
+            println!("    {c}");
+        }
+        println!();
     }
 }
 

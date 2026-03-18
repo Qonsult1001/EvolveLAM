@@ -513,6 +513,10 @@ pub async fn run_repl(
                 commands::handle_memories();
                 continue;
             }
+            s if s == "/graph" || s.starts_with("/graph ") => {
+                commands::handle_graph(input);
+                continue;
+            }
             s if s == "/forget" || s.starts_with("/forget ") => {
                 commands::handle_forget(input);
                 continue;
