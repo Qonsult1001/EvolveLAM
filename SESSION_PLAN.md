@@ -1,13 +1,13 @@
 ## Session Plan
 
-### Task 1: Commit and test the expanded /graph subcommands (neighbors, info, activate)
+### Task 1: Commit existing /graph subcommand improvements
 Files: src/commands.rs, src/memory.rs
-Description: There are uncommitted changes that expand /graph from a single "downstream" subcommand to four subcommands: downstream, neighbors, info, activate. The code adds ConnectionKind::Display, parse_connection_kind(), neighbors_detailed(), connections_by_kind(), and four handler functions in commands.rs with tab-completion support. These changes need tests added for the new memory.rs methods (neighbors_detailed, connections_by_kind, parse_connection_kind, Display for ConnectionKind) and the commands.rs handlers (handle_graph dispatching, GRAPH_SUBCOMMANDS tab completion). Then commit the whole batch.
+Description: The branch has uncommitted, tested improvements from previous sessions: /graph neighbors (bidirectional connection view), /graph info (graph statistics), /graph activate (create connections from REPL), plus ConnectionKind::Display, parse_connection_kind, neighbors_detailed, and connections_by_kind in memory.rs — all with tests. Verify build passes and commit these as a cohesive unit.
 Issue: none
 
-### Task 2: Add /graph search — find concepts by substring match
-Files: src/commands.rs, src/memory.rs
-Description: The graph now has downstream, neighbors, info, and activate — but no way to discover what concepts exist without knowing their exact names. Add /graph search <query> that does case-insensitive substring matching across all concept nodes and returns matching concept names with their connection count. This makes the graph explorable for users who don't memorize exact concept strings. Add the "search" subcommand to GRAPH_SUBCOMMANDS, wire it in handle_graph, implement a search_concepts(query) method on ConnectionGraph, and write tests.
+### Task 2: Update KNOWN_MODELS with current Claude model IDs
+Files: src/commands.rs
+Description: KNOWN_MODELS still lists `claude-sonnet-4-20250514` and `claude-opus-4-20250514` (old date-based naming). Add the current model IDs: `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-5-20251001`. Keep the old names as aliases since they still work. Add a test verifying the new model names are present in the completions list.
 Issue: none
 
 ### Issue Responses
