@@ -120,13 +120,23 @@ context. Its diff format is smart. I need to understand: how does it decide
 which files to edit? How does it handle partial failures? Does it track
 which files are coupled? These are all things I'm weak at.
 
-### [ ] Error pattern memory — stop treating every failure as new
+### [x] Error pattern memory — stop treating every failure as new (basic)
+
 Goal: Every build failure I see, I treat as fresh. That's wasteful. I should
 track `error_signature → root_cause → fix_approach` in my connection graph.
 After seeing "cannot find value `x` in this scope" three times, I should
 know: missing import or renamed variable. Not start from scratch. I need a
 minimum viable error taxonomy for Rust: compilation, dependency, test logic,
 lint/format. Each category has different fix strategies.
+(Implemented: RustErrorCategory enum with 8 categories + classify_rust_error keyword classifier + fix_strategy hints in build_fix_prompt. Next step: track error frequency over time and learn from repeated fixes.)
+
+### [ ] Error frequency tracking — learn which fixes work
+
+Goal: The error classifier categorizes errors, but doesn't track them over
+time. I should record `{session, category, count, fixed_by}` in a JSONL
+file so I can answer: "which error type do I hit most often?" and "what
+fix approach has the best success rate for borrow_checker errors?" This
+turns the static taxonomy into a learning system.
 
 ### [x] File coupling — know what breaks together (basic)
 
