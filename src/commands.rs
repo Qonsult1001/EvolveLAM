@@ -892,11 +892,11 @@ mod tests {
     use crate::commands_project::{
         build_commands_for_project, build_fix_prompt, build_project_tree, classify_rust_error,
         detect_project_name, detect_project_type, extract_first_meaningful_line, find_files,
-        fix_strategy, format_project_index, format_tree_from_paths, fuzzy_score,
-        generate_init_content, health_checks_for_project, highlight_match, is_binary_extension,
-        lint_command_for_project, run_health_check_for_project, run_health_checks_full_output,
-        run_shell_command, scan_important_dirs, scan_important_files, test_command_for_project,
-        IndexEntry, ProjectType, RustErrorCategory,
+        fix_strategy, format_error_classification, format_project_index, format_tree_from_paths,
+        fuzzy_score, generate_init_content, health_checks_for_project, highlight_match,
+        is_binary_extension, lint_command_for_project, run_health_check_for_project,
+        run_health_checks_full_output, run_shell_command, scan_important_dirs,
+        scan_important_files, test_command_for_project, IndexEntry, ProjectType, RustErrorCategory,
     };
     use crate::commands_session::{parse_bookmark_name, parse_spawn_task, Bookmarks};
     use crate::memory::{
@@ -3392,6 +3392,49 @@ mod tests {
         assert!(
             text.contains("/coupling"),
             "Help text should document /coupling command"
+        );
+    }
+
+    // ── format_error_classification tests ─────────────────────────────
+
+    #[test]
+    fn test_format_error_classification_shows_categories() {
+        let error = "error[E0432]: unresolved import `crate::foo`\nerror: cannot find value `bar` in this scope";
+        let failures = vec![("build", error)];
+        let output = format_error_classification(&failures);
+        assert!(
+            output.contains("missing_import"),
+            "Should show missing_import category: {output}"
+        );
+        assert!(output.contains("build"), "Should show check name: {output}");
+    }
+
+    #[test]
+    fn test_format_error_classification_shows_strategy() {
+        let error = "error: cannot borrow `x` as mutable";
+        let failures = vec![("build", error)];
+        let output = format_error_classification(&failures);
+        assert!(
+            output.contains("ownership"),
+            "Should include borrow_checker strategy hint: {output}"
+        );
+    }
+
+    #[test]
+    fn test_format_error_classification_empty_on_no_failures() {
+        let failures: Vec<(&str, &str)> = vec![];
+        let output = format_error_classification(&failures);
+        assert!(output.is_empty(), "No failures should produce empty output");
+    }
+
+    #[test]
+    fn test_format_error_classification_skips_unknown_only() {
+        let error = "some random error that doesn't match any pattern";
+        let failures = vec![("build", error)];
+        let output = format_error_classification(&failures);
+        assert!(
+            output.is_empty(),
+            "Unknown-only errors should not produce classification output: {output}"
         );
     }
 }

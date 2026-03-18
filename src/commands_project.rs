@@ -645,6 +645,37 @@ pub fn classify_rust_error(output: &str) -> Vec<(RustErrorCategory, usize)> {
     result
 }
 
+/// Format error classification results for terminal display.
+/// Shows detected categories with counts and top strategy hints.
+pub fn format_error_classification(failures: &[(&str, &str)]) -> String {
+    let mut output = String::new();
+    for (name, error_output) in failures {
+        let categories = classify_rust_error(error_output);
+        if categories.is_empty()
+            || (categories.len() == 1 && categories[0].0 == RustErrorCategory::Unknown)
+        {
+            continue;
+        }
+        let cat_parts: Vec<String> = categories
+            .iter()
+            .filter(|(cat, _)| *cat != RustErrorCategory::Unknown)
+            .map(|(cat, count)| format!("{count} {cat}"))
+            .collect();
+        if cat_parts.is_empty() {
+            continue;
+        }
+        output.push_str(&format!("  {name}: {}\n", cat_parts.join(", ")));
+        // Show strategy hint for the top category
+        if let Some((top_cat, _)) = categories
+            .iter()
+            .find(|(cat, _)| *cat != RustErrorCategory::Unknown)
+        {
+            output.push_str(&format!("    → {}\n", fix_strategy(*top_cat)));
+        }
+    }
+    output
+}
+
 /// Build a prompt describing health check failures for the AI to fix.
 /// Includes error classification and strategy hints for Rust projects.
 pub fn build_fix_prompt(failures: &[(&str, &str)]) -> String {
@@ -755,6 +786,12 @@ pub async fn handle_fix(
         return None;
     }
     let fail_count = failures.len();
+    // Show error classification summary before sending to AI
+    let classification = format_error_classification(&failures);
+    if !classification.is_empty() {
+        println!("\n{DIM}  Error analysis:{RESET}");
+        print!("{DIM}{classification}{RESET}");
+    }
     println!("\n{YELLOW}  Sending {fail_count} failure(s) to AI for fixing...{RESET}\n");
     let fix_prompt = build_fix_prompt(&failures);
     run_prompt(agent, &fix_prompt, session_total, model).await;
