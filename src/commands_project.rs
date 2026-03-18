@@ -444,6 +444,8 @@ pub fn health_checks_for_project(
 }
 
 /// Run health checks for a specific project type. Returns (name, passed, detail) tuples.
+/// Used by tests; handle_health() uses run_health_checks_with_classification() instead.
+#[allow(dead_code)]
 pub fn run_health_check_for_project(
     project_type: &ProjectType,
 ) -> Vec<(&'static str, bool, String)> {
@@ -726,25 +728,103 @@ pub fn handle_health() {
         return;
     }
     println!("{DIM}  Running health checks...{RESET}");
-    let results = run_health_check_for_project(&project_type);
+    let results = run_health_checks_with_classification(&project_type);
     if results.is_empty() {
         println!("{DIM}  No checks configured for {project_type}{RESET}\n");
         return;
     }
-    let all_passed = results.iter().all(|(_, passed, _)| *passed);
-    for (name, passed, detail) in &results {
+    let all_passed = results.iter().all(|(_, passed, _, _)| *passed);
+    for (name, passed, detail, classification) in &results {
         let icon = if *passed {
             format!("{GREEN}✓{RESET}")
         } else {
             format!("{RED}✗{RESET}")
         };
         println!("  {icon} {name}: {detail}");
+        if !classification.is_empty() {
+            println!("{DIM}    {classification}{RESET}");
+        }
     }
     if all_passed {
         println!("\n{GREEN}  All checks passed ✓{RESET}\n");
     } else {
         println!("\n{RED}  Some checks failed ✗{RESET}\n");
     }
+}
+
+/// Run health checks and classify failures.
+/// Returns (name, passed, display_detail, classification_summary).
+pub fn run_health_checks_with_classification(
+    project_type: &ProjectType,
+) -> Vec<(&'static str, bool, String, String)> {
+    let checks = health_checks_for_project(project_type);
+
+    let mut results = Vec::new();
+    for (name, args) in checks {
+        let start = std::time::Instant::now();
+        let output = std::process::Command::new(args[0])
+            .args(&args[1..])
+            .output();
+        let elapsed = format_duration(start.elapsed());
+        match output {
+            Ok(o) if o.status.success() => {
+                results.push((name, true, format!("ok ({elapsed})"), String::new()));
+            }
+            Ok(o) => {
+                let stdout = String::from_utf8_lossy(&o.stdout);
+                let stderr = String::from_utf8_lossy(&o.stderr);
+                let first_line = stderr.lines().next().unwrap_or("(unknown error)");
+                let detail = format!(
+                    "FAIL ({elapsed}): {}",
+                    truncate_with_ellipsis(first_line, 80)
+                );
+                // Classify the full error output
+                let mut full_output = String::new();
+                if !stdout.is_empty() {
+                    full_output.push_str(&stdout);
+                }
+                if !stderr.is_empty() {
+                    if !full_output.is_empty() {
+                        full_output.push('\n');
+                    }
+                    full_output.push_str(&stderr);
+                }
+                let classification = classify_failure_oneline(name, &full_output);
+                results.push((name, false, detail, classification));
+            }
+            Err(e) => {
+                results.push((name, false, format!("ERROR: {e}"), String::new()));
+            }
+        }
+    }
+    results
+}
+
+/// Classify a single failure's error output into a one-line summary.
+/// Returns empty string if no meaningful classification found.
+pub fn classify_failure_oneline(_name: &str, error_output: &str) -> String {
+    let categories = classify_rust_error(error_output);
+    if categories.is_empty()
+        || (categories.len() == 1 && categories[0].0 == RustErrorCategory::Unknown)
+    {
+        return String::new();
+    }
+    let cat_parts: Vec<String> = categories
+        .iter()
+        .filter(|(cat, _)| *cat != RustErrorCategory::Unknown)
+        .map(|(cat, count)| format!("{count} {cat}"))
+        .collect();
+    if cat_parts.is_empty() {
+        return String::new();
+    }
+    let mut line = format!("→ {}", cat_parts.join(", "));
+    if let Some((top_cat, _)) = categories
+        .iter()
+        .find(|(cat, _)| *cat != RustErrorCategory::Unknown)
+    {
+        line.push_str(&format!(" — {}", fix_strategy(*top_cat)));
+    }
+    line
 }
 
 /// Handle the /fix command. Returns Some(fix_prompt) if failures were sent to AI, None otherwise.

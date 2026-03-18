@@ -890,12 +890,13 @@ mod tests {
         parse_pr_args, DiffStatEntry, DiffStatSummary, PrSubcommand,
     };
     use crate::commands_project::{
-        build_commands_for_project, build_fix_prompt, build_project_tree, classify_rust_error,
-        detect_project_name, detect_project_type, extract_first_meaningful_line, find_files,
-        fix_strategy, format_error_classification, format_project_index, format_tree_from_paths,
-        fuzzy_score, generate_init_content, health_checks_for_project, highlight_match,
-        is_binary_extension, lint_command_for_project, run_health_check_for_project,
-        run_health_checks_full_output, run_shell_command, scan_important_dirs,
+        build_commands_for_project, build_fix_prompt, build_project_tree, classify_failure_oneline,
+        classify_rust_error, detect_project_name, detect_project_type,
+        extract_first_meaningful_line, find_files, fix_strategy, format_error_classification,
+        format_project_index, format_tree_from_paths, fuzzy_score, generate_init_content,
+        health_checks_for_project, highlight_match, is_binary_extension, lint_command_for_project,
+        run_health_check_for_project, run_health_checks_full_output,
+        run_health_checks_with_classification, run_shell_command, scan_important_dirs,
         scan_important_files, test_command_for_project, IndexEntry, ProjectType, RustErrorCategory,
     };
     use crate::commands_session::{parse_bookmark_name, parse_spawn_task, Bookmarks};
@@ -3435,6 +3436,62 @@ mod tests {
         assert!(
             output.is_empty(),
             "Unknown-only errors should not produce classification output: {output}"
+        );
+    }
+
+    // ── classify_failure_oneline tests ─────────────────────────────────
+
+    #[test]
+    fn test_classify_failure_oneline_missing_import() {
+        let error = "error[E0433]: cannot find value `foo` in this scope";
+        let line = classify_failure_oneline("build", error);
+        assert!(
+            line.contains("missing_import"),
+            "Should detect missing_import: {line}"
+        );
+        assert!(line.starts_with("→"), "Should start with arrow: {line}");
+        assert!(
+            line.contains("—"),
+            "Should include strategy separator: {line}"
+        );
+    }
+
+    #[test]
+    fn test_classify_failure_oneline_borrow_checker() {
+        let error = "error: cannot borrow `x` as mutable, as it is not declared as mutable";
+        let line = classify_failure_oneline("clippy", error);
+        assert!(
+            line.contains("borrow_checker"),
+            "Should detect borrow_checker: {line}"
+        );
+    }
+
+    #[test]
+    fn test_classify_failure_oneline_empty_on_unknown() {
+        let error = "some random error text";
+        let line = classify_failure_oneline("build", error);
+        assert!(
+            line.is_empty(),
+            "Unknown errors should return empty string: {line}"
+        );
+    }
+
+    #[test]
+    fn test_classify_failure_oneline_empty_on_empty_input() {
+        let line = classify_failure_oneline("build", "");
+        assert!(
+            line.is_empty(),
+            "Empty input should return empty string: {line}"
+        );
+    }
+
+    #[test]
+    fn test_run_health_checks_with_classification_returns_tuples() {
+        // Verifies the function signature works and returns 4-tuples
+        let results = run_health_checks_with_classification(&ProjectType::Unknown);
+        assert!(
+            results.is_empty(),
+            "Unknown project type should have no checks"
         );
     }
 }
