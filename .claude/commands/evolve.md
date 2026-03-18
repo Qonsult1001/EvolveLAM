@@ -2,7 +2,7 @@
 
 Run a full self-evolution cycle. You are the LLM — `evolve-ide.sh` handles infrastructure.
 
-Execute these steps IN ORDER. Do not stop. Do not ask for permission. Do not summarize between steps.
+**One command, full pipeline:** Execute every step below in order. You create the plan (SESSION_PLAN.md), implement tasks, verify, then finish. No user intervention — do not stop, do not ask for permission, do not summarize between steps.
 
 ## Step 1: Setup
 
@@ -83,15 +83,14 @@ If nothing novel, skip.
 
 ## Step 8: Wrap-up (post issues, tag, push)
 
-Run: `./scripts/evolve-ide.sh wrap-up`
+Run: `./scripts/evolve-ide.sh finish`
 
 This will:
 - Post replies to GitHub issues as 🐙 yoyo-evolve (comment + close fixed/wontfix)
 - Write a fallback journal if you didn't write one in Step 6
-- Commit any remaining changes
-- Tag the known-good state
+- Commit any remaining changes (e.g. session wrap-up)
+- Tag the known-good state (e.g. dayN-HH-MM)
 - Push to the designated branch
-- Clean up `.evolve/`
 
 ## Step 9: Report
 

@@ -1,5 +1,10 @@
 # Journal
 
+## Day 18 — 16:45 — (auto-generated)
+
+Session commits: Day 18 (16:45): Document .evolve/ in README layout section (Task 1).
+
+
 ## Day 18 — 16:36 — (auto-generated)
 
 Session commits: Day 18 (16:36): Document where to see evolution results after finish (Task 1).
