@@ -403,6 +403,28 @@ impl ConnectionGraph {
         conns
     }
 
+    /// Find the strongest connections from a given concept, ranked by effective weight
+    /// (recency-weighted). Recently activated connections surface first.
+    pub fn strongest_connections_weighted(
+        &self,
+        from: &str,
+        limit: usize,
+        now_ts: &str,
+    ) -> Vec<(&Connection, f64)> {
+        let mut conns: Vec<(&Connection, f64)> = self
+            .edges
+            .get(from)
+            .map(|v| {
+                v.iter()
+                    .map(|c| (c, effective_weight(c, now_ts, HALF_LIFE_DAYS)))
+                    .collect()
+            })
+            .unwrap_or_default();
+        conns.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        conns.truncate(limit);
+        conns
+    }
+
     /// Find all concepts connected to a given concept (neighbors in the graph).
     pub fn neighbors(&self, concept: &str) -> Vec<String> {
         let mut result = Vec::new();
@@ -540,8 +562,7 @@ impl ConnectionGraph {
 }
 
 /// Parse a timestamp string (YYYY-MM-DD or YYYY-MM-DD HH:MM) to days since 2000-01-01 (approximate).
-#[allow(dead_code)]
-fn timestamp_to_days(ts: &str) -> Option<f64> {
+pub fn timestamp_to_days(ts: &str) -> Option<f64> {
     let s = ts.trim().get(0..10)?;
     let parts: Vec<&str> = s.split('-').collect();
     if parts.len() != 3 {
@@ -553,9 +574,12 @@ fn timestamp_to_days(ts: &str) -> Option<f64> {
     Some((y - 2000.0) * 365.25 + (m - 1.0) * 30.44 + d)
 }
 
+/// Default half-life for temporal decay (days). Connections lose half their
+/// effective weight every 14 days without reactivation.
+pub const HALF_LIFE_DAYS: f64 = 14.0;
+
 /// Time-weighted relevance: effective weight = raw weight * 2^(-age_days / half_life_days).
 /// Raw weight is unchanged; use this when recency should influence influence.
-#[allow(dead_code)]
 pub fn effective_weight(conn: &Connection, now_ts: &str, half_life_days: f64) -> f64 {
     if half_life_days <= 0.0 {
         return conn.weight;
@@ -576,7 +600,7 @@ pub fn effective_weight(conn: &Connection, now_ts: &str, half_life_days: f64) ->
 }
 
 /// Get the current timestamp in a human-readable format.
-fn current_timestamp() -> String {
+pub fn current_timestamp() -> String {
     // Use a simple approach: shell out to date command for portability
     std::process::Command::new("date")
         .arg("+%Y-%m-%d %H:%M")
@@ -1105,6 +1129,43 @@ mod tests {
         );
         assert!(eff_recent <= 1.0 + 1e-6);
         assert!(eff_old > 0.0);
+    }
+
+    #[test]
+    fn test_strongest_connections_weighted() {
+        let mut graph = ConnectionGraph::default();
+        // Insert two connections from "core" with same raw weight but different timestamps
+        graph.edges.insert(
+            "core".to_string(),
+            vec![
+                Connection {
+                    from: "core".to_string(),
+                    to: "old_concept".to_string(),
+                    weight: 0.5,
+                    activations: 3,
+                    last_activated: "2026-02-01 12:00".to_string(),
+                    kind: ConnectionKind::Semantic,
+                    valid_when: None,
+                },
+                Connection {
+                    from: "core".to_string(),
+                    to: "recent_concept".to_string(),
+                    weight: 0.5,
+                    activations: 3,
+                    last_activated: "2026-03-18 12:00".to_string(),
+                    kind: ConnectionKind::Semantic,
+                    valid_when: None,
+                },
+            ],
+        );
+        let now = "2026-03-18 18:00";
+        let ranked = graph.strongest_connections_weighted("core", 2, now);
+        assert_eq!(ranked.len(), 2);
+        // Recent concept should rank first (higher effective weight)
+        assert_eq!(ranked[0].0.to, "recent_concept");
+        assert_eq!(ranked[1].0.to, "old_concept");
+        // Effective weights should differ despite same raw weight
+        assert!(ranked[0].1 > ranked[1].1);
     }
 
     #[test]

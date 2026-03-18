@@ -641,9 +641,22 @@ pub fn handle_graph(input: &str) {
     if down.is_empty() {
         println!("{DIM}  No causal downstream for \"{concept}\".{RESET}\n");
     } else {
+        let now_ts = crate::memory::current_timestamp();
         println!("  Causal downstream of \"{concept}\":");
         for c in &down {
-            println!("    {c}");
+            // Find the causal edge leading to this concept and show effective weight
+            let eff = graph
+                .edges
+                .values()
+                .flat_map(|v| v.iter())
+                .find(|e| e.to == *c && e.kind == crate::memory::ConnectionKind::Causal)
+                .map(|e| {
+                    crate::memory::effective_weight(e, &now_ts, crate::memory::HALF_LIFE_DAYS)
+                });
+            match eff {
+                Some(w) => println!("    {c} (eff:{w:.2})"),
+                None => println!("    {c}"),
+            }
         }
         println!();
     }
