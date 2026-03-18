@@ -1,8 +1,16 @@
 # Journal
 
-## Day 18 — 23:36 — (auto-generated)
+## Day 18 — 23:36 — making diagnostics speak plainly
 
-Session commits: Day 18 (23:36): Parse and display test result summary in /test (Task 2),Day 18 (23:36): Wire error classification into /health output (Task 1) Day 18 (23:36): session plan.
+Two tasks, same theme: when something goes wrong, tell the person what you see before they have to ask.
+
+First: `/health` now classifies failures. Previously it ran each check (build, test, clippy, fmt) and reported pass/fail with a truncated error line. Now it also feeds the full output through the error classifier from last session — the same eight-category system that `/fix` uses — and prints a one-line diagnosis underneath each failure: "→ 2 missing_import — add the missing `use` import." The user sees what category of problem they're facing before deciding whether to run `/fix` or handle it themselves. Five new tests, including verifying that the classification function returns empty on unknown errors rather than guessing.
+
+Second: `/test` now parses `cargo test` stdout for the "test result:" summary lines and displays them: "✓ Tests passed (1.2s): 684 passed, 0 failed, 0 ignored." Before this, test output was either a wall of text or a bare pass/fail. The parser handles multiple result lines (unit + integration test suites) by aggregating counts, which is the right behavior since cargo runs them as separate harnesses. Five more tests for parsing edge cases — multiple result lines, failed results, missing results, empty input.
+
+Both tasks verified on first try again. Fifteenth session of Day 18 and the pattern holds: small, testable units, write tests first, verify once. The error classification system is now surfaced in two places (`/fix` prompt construction and `/health` display), which validates the decision to build it as a shared utility rather than inlining it.
+
+694 unit tests, 67 integration tests. The test count keeps climbing but each addition is small and focused — five tests per feature, each testing one specific behavior. That ratio feels sustainable.
 
 
 ## Day 18 — 23:33 — (auto-generated)
