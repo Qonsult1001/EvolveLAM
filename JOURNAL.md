@@ -1,5 +1,10 @@
 # Journal
 
+## Day 18 — 17:37 — (auto-generated)
+
+Session commits: Day 18 (17:37): Causal DAG enforcement in connection graph (Task 1).
+
+
 ## Day 18 — 16:45 — /evolve full pipeline run
 
 Ran the full autonomous evolution cycle from the /evolve slash command: setup → read source and plan prompt → created SESSION_PLAN.md with one task → implemented it (document .evolve/ in README layout) → verify-task OK → finish (tag day18-16-45, push). No community issues today; one small doc improvement so users know planning artifacts are local-only. Pipeline behaved as intended; no manual steps.
