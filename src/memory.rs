@@ -176,13 +176,11 @@ pub fn format_memories_for_prompt(memory: &ProjectMemory) -> Option<String> {
 // ============================================================================
 
 /// Path to the connections archive (append-only JSONL).
-#[allow(dead_code)]
 const CONNECTIONS_FILE: &str = "memory/connections.jsonl";
 
 /// A connection between two learning concepts in the latent space.
 /// Weights strengthen each time both concepts co-activate.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[allow(dead_code)]
 pub struct Connection {
     /// Source node identifier (learning title or concept tag).
     pub from: String,
@@ -204,7 +202,6 @@ pub struct Connection {
 /// Types of connections in the latent space graph.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
-#[allow(dead_code)]
 pub enum ConnectionKind {
     /// Concepts share semantic meaning (similar topics).
     Semantic,
@@ -236,7 +233,6 @@ pub struct ScientificLearning {
 
 /// The in-memory connection graph.
 #[derive(Debug, Clone, Default)]
-#[allow(dead_code)]
 pub struct ConnectionGraph {
     /// All connections indexed by source node.
     pub edges: HashMap<String, Vec<Connection>>,
@@ -244,7 +240,6 @@ pub struct ConnectionGraph {
     pub node_activations: HashMap<String, u64>,
 }
 
-#[allow(dead_code)]
 impl ConnectionGraph {
     /// Load connections from the JSONL archive.
     pub fn load() -> Self {
@@ -272,6 +267,7 @@ impl ConnectionGraph {
 
     /// Returns true if adding a causal edge from→to would create a cycle in the causal subgraph.
     /// Causal connections must remain acyclic (DAG).
+    #[allow(dead_code)] // Called from activate_connection (test-only path)
     fn would_causal_cycle(&self, from: &str, to: &str) -> bool {
         // Build causal out-edges: node -> list of targets (causal only)
         let mut out: HashMap<String, Vec<String>> = HashMap::new();
@@ -287,6 +283,7 @@ impl ConnectionGraph {
     }
 
     /// DFS in the causal subgraph: is there a path from `start` to `target`?
+    #[allow(dead_code)] // Called from would_causal_cycle
     fn has_path_causal(
         &self,
         out: &HashMap<String, Vec<String>>,
@@ -314,6 +311,7 @@ impl ConnectionGraph {
     /// Strengthen a connection between two concepts (or create it).
     /// Returns the new weight after strengthening.
     /// Causal edges are rejected if they would create a cycle (DAG enforcement).
+    #[allow(dead_code)] // Used by evolution scripts; not called from REPL binary path yet
     pub fn activate_connection(&mut self, from: &str, to: &str, kind: ConnectionKind) -> f64 {
         let timestamp = current_timestamp();
 
@@ -388,6 +386,7 @@ impl ConnectionGraph {
 
     /// Find the strongest connections from a given concept.
     /// Returns connections sorted by weight (strongest first).
+    #[allow(dead_code)] // API for future REPL commands
     pub fn strongest_connections(&self, from: &str, limit: usize) -> Vec<&Connection> {
         let mut conns: Vec<&Connection> = self
             .edges
@@ -405,6 +404,7 @@ impl ConnectionGraph {
 
     /// Find the strongest connections from a given concept, ranked by effective weight
     /// (recency-weighted). Recently activated connections surface first.
+    #[allow(dead_code)] // API for future REPL commands
     pub fn strongest_connections_weighted(
         &self,
         from: &str,
@@ -426,6 +426,7 @@ impl ConnectionGraph {
     }
 
     /// Find all concepts connected to a given concept (neighbors in the graph).
+    #[allow(dead_code)] // API for future REPL commands
     pub fn neighbors(&self, concept: &str) -> Vec<String> {
         let mut result = Vec::new();
         if let Some(edges) = self.edges.get(concept) {
@@ -446,6 +447,7 @@ impl ConnectionGraph {
 
     /// Compute concept similarity using shared connections (Jaccard index).
     /// Two concepts are similar if they connect to the same things.
+    #[allow(dead_code)] // API for future REPL commands
     pub fn concept_similarity(&self, a: &str, b: &str) -> f64 {
         let neighbors_a: std::collections::HashSet<String> =
             self.neighbors(a).into_iter().collect();
@@ -467,11 +469,13 @@ impl ConnectionGraph {
     }
 
     /// Save the entire graph to the JSONL archive.
+    #[allow(dead_code)] // Used by evolution scripts; not called from REPL binary path yet
     pub fn save(&self) -> Result<(), String> {
         self.save_to(Path::new(CONNECTIONS_FILE))
     }
 
     /// Save the entire graph to a specific path (for testing).
+    #[allow(dead_code)] // Used in tests and by save()
     pub fn save_to(&self, path: &Path) -> Result<(), String> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
@@ -491,6 +495,7 @@ impl ConnectionGraph {
 
     /// Ingest a scientific learning: create a node and connect it to related concepts.
     /// Returns the number of new connections formed.
+    #[allow(dead_code)] // API for evolution scripts
     pub fn ingest_scientific_learning(&mut self, learning: &ScientificLearning) -> usize {
         let node_name = format!("{}:{}", learning.domain, learning.concept);
         let mut connections_formed = 0;
