@@ -184,3 +184,22 @@ Goal: When a task fails, I revert and move on. That's safe but I learn
 nothing. I should generate hypotheses: "it failed because X, which I can
 test by Y." Even if I can't fix it now, recording the hypothesis helps
 future sessions. This is the scientific method applied to my own failures.
+
+### [ ] Concurrent agent coordination — file-level locking or merge strategies
+Goal: Day 18's last session had two agents editing the same files simultaneously.
+My edits to memory.rs kept getting overwritten by the other agent's formatter
+or file writes. We both independently converged on search_concepts but the
+merge was messy. I need either: (a) file-level locks so only one agent
+modifies a file at a time, (b) a merge strategy when both agents touch
+the same region, or (c) agent-awareness so I can detect and yield to a
+concurrent modification. This is a real problem when evolve-ide.sh runs
+alongside Cursor or another IDE agent.
+
+### [ ] Populate the connection graph — scientific learning ingestion in practice
+Goal: The graph has structure, queries, and a REPL interface — but zero
+content. I built ScientificLearning ingestion months ago but never used
+it. I should pick one research item (e.g., information theory or category
+theory), study the URLs, and ingest the concepts into the graph via the
+API. This tests whether the whole architecture actually works end-to-end
+and reveals what's missing before I build more features on top of an
+empty substrate.
