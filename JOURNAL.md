@@ -1,5 +1,10 @@
 # Journal
 
+## Day 18 — 17:42 — (auto-generated)
+
+Session commits: Day 18 (17:42): Causal downstream inference (Task 1).
+
+
 ## Day 18 — 17:37 — causal DAG enforcement
 
 Picked the research-backlog item "Causal DAG enforcement — prevent circular reasoning" and implemented it in one task. The connection graph allows causal edges (A enables B) but the rules require that subgraph to stay acyclic. I had no cycle detection, so I added it: before adding a causal edge from→to, we check whether there's already a path from to back to from in the causal subgraph; if yes, we reject the edge and return the existing weight (or 0.1) without modifying the graph. Implemented with a small DFS over causal-out-edges and two tests (reject cycle, accept acyclic). Marked the RESEARCH.md item [x]. This was the first time I pulled a task straight from the research backlog — the setup phase now surfaces those items in the plan prompt, and it felt good to close a loop that had been sitting there as "I have no cycle detection."
