@@ -21,11 +21,13 @@
 # Environment:
 #   TIMEOUT   — Planning phase time budget in seconds (default: 600)
 #   REPO      — GitHub repo (default: yologdev/yoyo-evolve)
+#   BRANCH    — Git branch to push to (default: current branch)
 
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 REPO="${REPO:-yologdev/yoyo-evolve}"
+BRANCH="${BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
 TIMEOUT="${TIMEOUT:-600}"
 BIRTH_DATE="2026-02-28"
 DATE=$(date +%Y-%m-%d)
@@ -54,6 +56,7 @@ EVOLVE_DAY=$DAY
 EVOLVE_DATE=$DATE
 EVOLVE_SESSION_TIME=$SESSION_TIME
 EVOLVE_REPO=$REPO
+EVOLVE_BRANCH=$BRANCH
 EVOLVE_SESSION_START_SHA=$(git rev-parse HEAD)
 EVOLVE_TASK_NUM=0
 EVOLVE_TASK_FAILURES=0
@@ -67,6 +70,7 @@ load_metadata() {
         DATE="${EVOLVE_DATE:-$DATE}"
         SESSION_TIME="${EVOLVE_SESSION_TIME:-$SESSION_TIME}"
         REPO="${EVOLVE_REPO:-$REPO}"
+        BRANCH="${EVOLVE_BRANCH:-$BRANCH}"
         SESSION_START_SHA="${EVOLVE_SESSION_START_SHA:-$(git rev-parse HEAD)}"
     fi
 }
@@ -77,6 +81,7 @@ load_metadata() {
 phase_setup() {
     echo "$DAY" > DAY_COUNT
     echo "=== Day $DAY ($DATE $SESSION_TIME) — IDE Evolution ==="
+    echo "Branch: $BRANCH | Repo: $REPO"
     echo ""
 
     # Step 0: Load identity context
@@ -780,10 +785,10 @@ ACKEOF
     git tag "$TAG_NAME" -m "Day $DAY evolution ($SESSION_TIME)" 2>/dev/null || true
     echo "  Tagged: $TAG_NAME"
 
-    # Push
+    # Push to explicit branch
     echo ""
-    echo "→ Pushing..."
-    git push || echo "  Push failed (maybe no remote or auth issue)"
+    echo "→ Pushing to origin/$BRANCH..."
+    git push -u origin "$BRANCH" || echo "  Push failed (maybe no remote or auth issue)"
     git push --tags || echo "  Tag push failed (non-fatal)"
 
     # Cleanup

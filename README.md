@@ -225,8 +225,12 @@ Create a `YOYO.md` (or `CLAUDE.md`) in your project root with build commands, ar
 
 ## How It Evolves
 
+yoyo has two evolution modes:
+
+### CI Mode (`evolve.sh`) — Autonomous, runs in GitHub Actions
+
 ```
-Every 8 hours, yoyo wakes up and:
+Every 4-8 hours, yoyo wakes up and:
     → Reads its own source code
     → Checks GitHub issues for community input
     → Plans what to improve
@@ -234,14 +238,57 @@ Every 8 hours, yoyo wakes up and:
     → If tests pass → commit. If not → revert.
     → Replies to issues as 🐙 yoyo-evolve[bot]
     → Pushes and goes back to sleep
+```
 
+### IDE Mode (`evolve-ide.sh`) — Interactive, runs inside your coding agent
+
+When you run yoyo's evolution from inside an IDE agent (Claude Code, Cursor, etc.),
+there's no need for the yoyo binary as a middleman — the IDE agent already has all
+the tools. `evolve-ide.sh` is a phased orchestrator that does the bash infrastructure
+and outputs structured prompts for the IDE to act on directly.
+
+```bash
+# 1. Setup — build check, CI status, fetch issues, write planning prompt
+./scripts/evolve-ide.sh setup
+
+# 2. Read .evolve/plan_prompt.md and act on it → create SESSION_PLAN.md
+
+# 3. Get the next task prompt
+./scripts/evolve-ide.sh next-task
+
+# 4. Read .evolve/task_prompt.md and act on it → implement + commit
+
+# 5. Verify the task (protected files, build, tests)
+./scripts/evolve-ide.sh verify-task
+
+# 6. Repeat 3-5 until next-task says "done"
+
+# 7. Finish — verify build, journal, issue responses, tag, push
+./scripts/evolve-ide.sh finish
+```
+
+Environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BRANCH` | current branch | Git branch to push to |
+| `REPO` | `yologdev/yoyo-evolve` | GitHub repo for issues/CI |
+| `TIMEOUT` | `600` | Planning phase time budget (seconds) |
+
+### Social sessions
+
+```
 Every 4 hours (offset), yoyo runs a social session:
     → Reads GitHub Discussions
     → Replies to conversations it's part of
     → Joins new discussions if it has something real to say
     → Occasionally starts its own discussion
     → Learns from interacting with humans
+```
 
+### Memory synthesis
+
+```
 Daily, a synthesis job regenerates active memory:
     → Reads JSONL archives (learnings + social learnings)
     → Applies time-weighted compression (recent=full, old=themed)
@@ -331,7 +378,8 @@ site/                   gitignored build output (built by CI Pages workflow)
   index.html            Journey homepage (built by build_site.py)
   book/                 mdbook output
 scripts/
-  evolve.sh             Evolution pipeline (plan → implement → respond)
+  evolve.sh             CI evolution pipeline (plan → implement → respond)
+  evolve-ide.sh         IDE evolution orchestrator (phased, no yoyo binary needed)
   social.sh             Social session (discussions → reply → learn)
   format_issues.py      Issue selection & formatting
   format_discussions.py Discussion fetching & formatting (GraphQL)

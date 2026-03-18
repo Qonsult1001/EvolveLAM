@@ -24,9 +24,20 @@ ANTHROPIC_API_KEY=sk-... cargo run
 ANTHROPIC_API_KEY=sk-... cargo run -- --model claude-opus-4-6 --skills ./skills
 ```
 
-To trigger a full evolution cycle:
+To trigger a full evolution cycle (CI mode, requires API key):
 ```bash
 ANTHROPIC_API_KEY=sk-... ./scripts/evolve.sh
+```
+
+To run evolution from inside an IDE agent (Claude Code, Cursor, etc.):
+```bash
+./scripts/evolve-ide.sh setup        # Build check, CI, fetch issues → .evolve/plan_prompt.md
+# Read .evolve/plan_prompt.md and act on it → create SESSION_PLAN.md
+./scripts/evolve-ide.sh next-task    # Extract next task → .evolve/task_prompt.md
+# Read .evolve/task_prompt.md and implement it
+./scripts/evolve-ide.sh verify-task  # Verification gate (protected files, build, tests)
+# Repeat next-task/verify-task for each task
+./scripts/evolve-ide.sh finish       # Journal, issue responses, tag, push
 ```
 
 ## Architecture
@@ -41,12 +52,19 @@ Uses `yoagent::Agent` with `AnthropicProvider`, `default_tools()`, and an option
 
 **Documentation** (`docs/`): mdbook source in `docs/src/`, config in `docs/book.toml`. Output goes to `site/book/` (gitignored). The journal homepage (`site/index.html`) is built by `scripts/build_site.py`. Both are built and deployed by the Pages workflow (`.github/workflows/pages.yml`), not during evolution.
 
-**Evolution loop** (`scripts/evolve.sh`): 3-phase pipeline:
+**Evolution loop — CI mode** (`scripts/evolve.sh`): 3-phase pipeline that runs the yoyo binary for LLM calls:
 1. Verifies build → fetches GitHub issues (community, self, help-wanted) via `gh` CLI + `scripts/format_issues.py` → scans for pending replies on previously touched issues
 2. **Phase A** (Planning): Agent reads everything, writes `SESSION_PLAN.md`
 3. **Phase B** (Implementation): Agents execute each task (15 min each)
 4. **Phase C** (Communication): Extracts issue responses from plan
 5. Verifies build, fixes or reverts → posts issue responses → pushes
+
+**Evolution loop — IDE mode** (`scripts/evolve-ide.sh`): Phased orchestrator for running evolution inside an IDE agent (Claude Code, Cursor, etc.). Unlike `evolve.sh`, it does NOT use the yoyo binary — the IDE agent already has all the tools. Subcommands:
+- `setup` — build check, CI status, fetch issues → writes `.evolve/plan_prompt.md`
+- `next-task` — extracts next task from `SESSION_PLAN.md` → writes `.evolve/task_prompt.md`
+- `verify-task` — per-task verification gate (protected files, build, tests; reverts on failure)
+- `finish` — verify build, write journal, post issue responses, tag, push to `$BRANCH`
+- Environment: `BRANCH` (push target, default: current branch), `REPO`, `TIMEOUT`
 
 **Skills** (`skills/`): Markdown files with YAML frontmatter loaded via `--skills ./skills`. Four core skills (immutable) define the agent's evolution workflow:
 - `self-assess` — read own code, try tasks, find bugs/gaps
