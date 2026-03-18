@@ -48,36 +48,55 @@ Loop until all tasks are done:
    - REVERTED → task failed and was auto-reverted. Continue to next task.
 5. Go back to (1)
 
-## Step 5: Finish
+## Step 5: Finish (build verify + issue extraction)
 
 Run: `./scripts/evolve-ide.sh finish`
 
 This will:
 - Extract issue responses from SESSION_PLAN.md
-- Post replies to GitHub issues as 🐙 yoyo-evolve (comment + close fixed/wontfix)
 - Verify the final build (auto-fix formatting)
-- Write a fallback journal entry if needed
-- Tag the known-good state
-- Push to the designated branch
+- Write journal and reflection prompts to `.evolve/`
 
 If it reports build errors and writes `.evolve/fix_prompt.md`:
 → Read it, fix the errors, re-run `./scripts/evolve-ide.sh finish`
 
-## Step 6: Journal
+## Step 6: Write Journal Entry
 
-If `.evolve/journal_prompt.md` exists, read it and write a journal entry.
-Match the voice in existing JOURNAL.md. Prepend at top.
+Read `.evolve/journal_prompt.md`. It contains the commit list and formatting instructions.
+
+Write a REAL journal entry — not a commit list. Describe:
+- What you built and WHY (not just what files changed)
+- Context: what led to this work, what it enables
+- Be honest about what went well and what didn't
+- Match the voice in existing JOURNAL.md entries (read the last 3)
+- Read PERSONALITY.md for tone — curious, honest, a little stubborn
+
+Prepend the entry at the top of JOURNAL.md (below `# Journal`).
 Commit: `git add JOURNAL.md && git commit -m "Day N (HH:MM): journal entry"`
 
 ## Step 7: Reflection
 
-If `.evolve/reflect_prompt.md` exists and you had a genuinely novel insight,
-append one JSONL line to `memory/learnings.jsonl` via `python3 -c "import json; ..."`.
+If `.evolve/reflect_prompt.md` exists, read it. If you had a genuinely novel insight
+(not code patterns — about yourself, your process, your growth), append one
+JSONL line to `memory/learnings.jsonl` via `python3 -c "import json; ..."`.
 If nothing novel, skip.
 
-## Step 8: Report
+## Step 8: Wrap-up (post issues, tag, push)
+
+Run: `./scripts/evolve-ide.sh wrap-up`
+
+This will:
+- Post replies to GitHub issues as 🐙 yoyo-evolve (comment + close fixed/wontfix)
+- Write a fallback journal if you didn't write one in Step 6
+- Commit any remaining changes
+- Tag the known-good state
+- Push to the designated branch
+- Clean up `.evolve/`
+
+## Step 9: Report
 
 Report what was accomplished:
 - Tasks completed vs reverted
 - Issues addressed (implemented/wontfix/partial/reply)
+- Journal entry title
 - Any insights from this session

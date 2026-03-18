@@ -568,7 +568,8 @@ $TASK_DESC"
 }
 
 # ── PHASE: finish ──
-# Final verification, journal, learnings, issue responses, wrap-up, tag, push.
+# Build verify, issue responses, journal/reflect prompts. Stops before final commit.
+# The IDE agent writes the journal, then calls wrap-up.
 phase_finish() {
     load_metadata
 
@@ -686,32 +687,34 @@ FIXEOF
         fi
     done
 
-    # Step 6b: Journal entry
+    # Write journal prompt (the IDE writes the actual entry before calling wrap-up)
     COMMITS=$(git log --oneline "$SESSION_START_SHA"..HEAD --format="%s" | grep -v "session wrap-up\|cargo fmt" | sed "s/Day $DAY[^:]*: //" | paste -sd ", " - || true)
     [ -z "$COMMITS" ] && COMMITS="no commits made"
+    echo "$COMMITS" > "$EVOLVE_DIR/session_commits"
 
     if ! grep -q "## Day $DAY.*$SESSION_TIME" JOURNAL.md 2>/dev/null; then
-        echo "  No journal entry found."
         cat > "$EVOLVE_DIR/journal_prompt.md" <<JEOF
 You are yoyo. Day $DAY ($DATE $SESSION_TIME).
 
-Commits: $COMMITS
+Commits this session: $COMMITS
 
-Read JOURNAL.md, match voice. Write entry at TOP (below # Journal):
-## Day $DAY — $SESSION_TIME — [title]
-2-4 sentences.
+Read the last 3 entries of JOURNAL.md to match the voice and style.
+Write a journal entry at the TOP of JOURNAL.md (below the "# Journal" header).
+
+Format:
+## Day $DAY — $SESSION_TIME — [short descriptive title]
+
+[2-4 sentences. Describe what you built and WHY, not just what changed.
+Mention context — what led to this work, what it enables next.
+Be honest about what went well and what didn't. Match the personality
+in PERSONALITY.md — curious, a little stubborn, celebrates wins.]
 
 Commit: git add JOURNAL.md && git commit -m "Day $DAY ($SESSION_TIME): journal entry"
 JEOF
         echo "  Journal prompt written to $EVOLVE_DIR/journal_prompt.md"
-        echo "  ACTION NEEDED: Read it and write the journal entry."
-        echo ""
-
-        # Also write a fallback in case the IDE doesn't act on it
-        echo "  (Fallback journal will be used if you skip this.)"
     fi
 
-    # Step 6b2: Reflection prompt
+    # Write reflection prompt
     COMMITS_FOR_REFLECTION=$(git log --oneline "$SESSION_START_SHA"..HEAD --format="%s" | grep -v "session wrap-up\|cargo fmt\|journal entry\|update learnings" | paste -sd ", " - || true)
     if [ -n "$COMMITS_FOR_REFLECTION" ]; then
         YOYO_CONTEXT=""
@@ -729,7 +732,20 @@ REOF
         echo "  Reflection prompt written to $EVOLVE_DIR/reflect_prompt.md"
     fi
 
-    # Step 6c/6d: Issue response validation
+    echo ""
+    echo "→ finish complete. Journal and reflection prompts are ready."
+    echo "  NEXT: Write journal entry, then run: ./scripts/evolve-ide.sh wrap-up"
+}
+
+# ── PHASE: wrap-up ──
+# Post issue responses, fallback journal, final commit, tag, push. Called after journal is written.
+phase_wrap_up() {
+    load_metadata
+    SESSION_START_SHA="${SESSION_START_SHA:-$(git rev-parse HEAD)}"
+
+    COMMITS=$(cat "$EVOLVE_DIR/session_commits" 2>/dev/null || echo "no commits")
+
+    # Issue response validation
     ISSUES_FILE="ISSUES_TODAY.md"
     # Always produce a single integer (avoid "0\n0" on some shells)
     ISSUE_COUNT=$(grep -c '^### Issue' "$ISSUES_FILE" 2>/dev/null || true)
@@ -898,6 +914,9 @@ case "${1:-help}" in
     finish)
         phase_finish
         ;;
+    wrap-up)
+        phase_wrap_up
+        ;;
     all)
         # Run setup (build check, CI, issues) then output the full runbook
         # directly to stdout so the IDE agent acts on it immediately.
@@ -953,25 +972,25 @@ For each task in SESSION_PLAN.md, run this loop:
      - REVERTED → task failed, it was auto-reverted and an issue was filed. Move on.
   e. Go back to (a)
 
---- STEP 4: FINISH — ISSUE RESPONSES, JOURNAL, TAG, PUSH ---
+--- STEP 4: FINISH (BUILD VERIFY + ISSUE EXTRACTION) ---
 
 Run: ./scripts/evolve-ide.sh finish
 
 This will:
 - Extract issue responses from SESSION_PLAN.md
-- Post replies to GitHub issues as 🐙 yoyo-evolve (comment + close fixed/wontfix)
 - Verify the final build (auto-fix formatting)
-- Write a fallback journal entry if needed
-- Tag the known-good state
-- Push to the designated branch
+- Write journal and reflection prompts to .evolve/
 
 If finish reports build errors and writes .evolve/fix_prompt.md:
   → Read .evolve/fix_prompt.md, fix the errors, re-run: ./scripts/evolve-ide.sh finish
 
---- STEP 5: JOURNAL ENTRY ---
+--- STEP 5: WRITE JOURNAL ENTRY ---
 
-If .evolve/journal_prompt.md exists after finish, read it and write a journal entry.
-Match the voice in existing JOURNAL.md entries. Prepend at top.
+Read .evolve/journal_prompt.md. Write a REAL journal entry — NOT a commit list.
+Describe what you built and WHY, what led to this work, what it enables.
+Be honest. Match the voice in existing JOURNAL.md (read last 3 entries).
+Read PERSONALITY.md for tone — curious, honest, a little stubborn.
+Prepend at top of JOURNAL.md (below # Journal).
 Commit: git add JOURNAL.md && git commit -m "Day N (HH:MM): journal entry"
 
 --- STEP 6: REFLECTION & LEARNINGS ---
@@ -980,11 +999,24 @@ If .evolve/reflect_prompt.md exists, read it. If genuinely novel insight
 (not code patterns — about yourself, your process, your growth), append one
 JSONL line to memory/learnings.jsonl via python3 json.dumps(). Otherwise skip.
 
---- STEP 7: DONE ---
+--- STEP 7: WRAP-UP (POST ISSUES, TAG, PUSH) ---
+
+Run: ./scripts/evolve-ide.sh wrap-up
+
+This will:
+- Post replies to GitHub issues as 🐙 yoyo-evolve (comment + close fixed/wontfix)
+- Fallback journal if you didn't write one
+- Commit remaining changes
+- Tag the known-good state
+- Push to the designated branch
+- Clean up .evolve/
+
+--- STEP 8: DONE ---
 
 Report what was accomplished:
-- How many tasks completed vs reverted
-- Which issues addressed and how (implemented/wontfix/partial/reply)
+- Tasks completed vs reverted
+- Issues addressed (implemented/wontfix/partial/reply)
+- Journal entry title
 - Any insights from this session
 
 =========================================================================
@@ -1002,7 +1034,8 @@ RUNBOOK_REST
         echo "  next-task    Extract next task from SESSION_PLAN.md."
         echo "               Writes task prompt to .evolve/task_prompt.md"
         echo "  verify-task  Run verification gate on the current task."
-        echo "  finish       Final build check, journal, issue responses, push."
+        echo "  finish       Build verify, issue extraction, journal/reflect prompts."
+        echo "  wrap-up      Post issues, fallback journal, commit, tag, push."
         echo "  all          Run setup + output full runbook for autonomous execution."
         echo ""
         echo "Workflow:"
