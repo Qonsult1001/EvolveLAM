@@ -890,13 +890,13 @@ mod tests {
         parse_pr_args, DiffStatEntry, DiffStatSummary, PrSubcommand,
     };
     use crate::commands_project::{
-        build_commands_for_project, build_fix_prompt, build_project_tree, detect_project_name,
-        detect_project_type, extract_first_meaningful_line, find_files, format_project_index,
-        format_tree_from_paths, fuzzy_score, generate_init_content, health_checks_for_project,
-        highlight_match, is_binary_extension, lint_command_for_project,
-        run_health_check_for_project, run_health_checks_full_output, run_shell_command,
-        scan_important_dirs, scan_important_files, test_command_for_project, IndexEntry,
-        ProjectType,
+        build_commands_for_project, build_fix_prompt, build_project_tree, classify_rust_error,
+        detect_project_name, detect_project_type, extract_first_meaningful_line, find_files,
+        fix_strategy, format_project_index, format_tree_from_paths, fuzzy_score,
+        generate_init_content, health_checks_for_project, highlight_match, is_binary_extension,
+        lint_command_for_project, run_health_check_for_project, run_health_checks_full_output,
+        run_shell_command, scan_important_dirs, scan_important_files, test_command_for_project,
+        IndexEntry, ProjectType, RustErrorCategory,
     };
     use crate::commands_session::{parse_bookmark_name, parse_spawn_task};
     use crate::memory::{
@@ -1678,6 +1678,11 @@ mod tests {
             prompt.contains("unused variable"),
             "Prompt should include clippy warning"
         );
+        // New: should contain error classification
+        assert!(
+            prompt.contains("Error categories"),
+            "Prompt should include error classification"
+        );
     }
 
     #[test]
@@ -1688,6 +1693,79 @@ mod tests {
             prompt.is_empty() || prompt.contains("Fix"),
             "Empty failures should produce empty or minimal prompt"
         );
+    }
+
+    #[test]
+    fn test_classify_rust_error_missing_import() {
+        let output = "error[E0433]: failed to resolve: cannot find value `foo` in this scope\n  --> src/main.rs:10:5";
+        let cats = classify_rust_error(output);
+        assert_eq!(cats[0].0, RustErrorCategory::MissingImport);
+    }
+
+    #[test]
+    fn test_classify_rust_error_type_mismatch() {
+        let output = "error[E0308]: mismatched types\n  --> src/main.rs:42\n  |\n42 |     let x: i32 = \"hello\";\n   |                  expected i32, found &str";
+        let cats = classify_rust_error(output);
+        assert_eq!(cats[0].0, RustErrorCategory::TypeMismatch);
+    }
+
+    #[test]
+    fn test_classify_rust_error_borrow() {
+        let output =
+            "error[E0502]: cannot borrow `x` as mutable because it is also borrowed as immutable";
+        let cats = classify_rust_error(output);
+        assert_eq!(cats[0].0, RustErrorCategory::BorrowChecker);
+    }
+
+    #[test]
+    fn test_classify_rust_error_unused() {
+        let output = "warning: unused variable: `x`\n  --> src/main.rs:5\n  = note: `#[warn(unused_variables)]` on by default";
+        let cats = classify_rust_error(output);
+        assert_eq!(cats[0].0, RustErrorCategory::Unused);
+    }
+
+    #[test]
+    fn test_classify_rust_error_test_failure() {
+        let output = "test tests::my_test ... FAILED\n\nfailures:\n\n---- tests::my_test stdout ----\nthread 'tests::my_test' panicked at 'assertion failed: x == 5'";
+        let cats = classify_rust_error(output);
+        assert_eq!(cats[0].0, RustErrorCategory::TestFailure);
+    }
+
+    #[test]
+    fn test_classify_rust_error_unknown() {
+        let output = "some random error that doesn't match any pattern";
+        let cats = classify_rust_error(output);
+        assert_eq!(cats[0].0, RustErrorCategory::Unknown);
+    }
+
+    #[test]
+    fn test_classify_rust_error_multiple_categories() {
+        let output = "error: cannot find value `foo` in this scope\nwarning: unused variable `bar`\nwarning: unused import `baz`";
+        let cats = classify_rust_error(output);
+        // Should have both MissingImport and Unused
+        let cat_names: Vec<RustErrorCategory> = cats.iter().map(|(c, _)| *c).collect();
+        assert!(cat_names.contains(&RustErrorCategory::MissingImport));
+        assert!(cat_names.contains(&RustErrorCategory::Unused));
+    }
+
+    #[test]
+    fn test_fix_strategy_returns_nonempty() {
+        let categories = [
+            RustErrorCategory::MissingImport,
+            RustErrorCategory::TypeMismatch,
+            RustErrorCategory::BorrowChecker,
+            RustErrorCategory::Unused,
+            RustErrorCategory::TestFailure,
+            RustErrorCategory::Format,
+            RustErrorCategory::Clippy,
+            RustErrorCategory::Unknown,
+        ];
+        for cat in &categories {
+            assert!(
+                !fix_strategy(*cat).is_empty(),
+                "Strategy for {cat} should not be empty"
+            );
+        }
     }
 
     #[test]

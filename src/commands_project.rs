@@ -518,7 +518,135 @@ pub fn run_health_checks_full_output(
     results
 }
 
+// ── Error Classification ──────────────────────────────────────────────
+
+/// Categories of Rust build/lint/test errors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RustErrorCategory {
+    /// Missing import, unresolved name, module not found.
+    MissingImport,
+    /// Type mismatch, expected X found Y.
+    TypeMismatch,
+    /// Borrow checker: lifetime, move, borrow errors.
+    BorrowChecker,
+    /// Unused variable, import, function — typically warnings.
+    Unused,
+    /// Test assertion failures.
+    TestFailure,
+    /// Formatting issues (cargo fmt).
+    Format,
+    /// Clippy lints.
+    Clippy,
+    /// Anything else.
+    Unknown,
+}
+
+impl std::fmt::Display for RustErrorCategory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RustErrorCategory::MissingImport => write!(f, "missing_import"),
+            RustErrorCategory::TypeMismatch => write!(f, "type_mismatch"),
+            RustErrorCategory::BorrowChecker => write!(f, "borrow_checker"),
+            RustErrorCategory::Unused => write!(f, "unused"),
+            RustErrorCategory::TestFailure => write!(f, "test_failure"),
+            RustErrorCategory::Format => write!(f, "format"),
+            RustErrorCategory::Clippy => write!(f, "clippy"),
+            RustErrorCategory::Unknown => write!(f, "unknown"),
+        }
+    }
+}
+
+/// Fix strategy hint for each error category.
+pub fn fix_strategy(cat: RustErrorCategory) -> &'static str {
+    match cat {
+        RustErrorCategory::MissingImport => {
+            "Add the missing `use` import or check for typos in the module path. If a type was renamed, update all references."
+        }
+        RustErrorCategory::TypeMismatch => {
+            "Check the expected vs actual types. Common fixes: add .into(), change return type, add/remove & or *, or use as."
+        }
+        RustErrorCategory::BorrowChecker => {
+            "Look at ownership flow. Common fixes: clone the value, restructure to avoid simultaneous borrows, add lifetime annotations, or use Arc/Rc."
+        }
+        RustErrorCategory::Unused => {
+            "Remove the unused item, prefix with _ if intentionally unused, or add #[allow(dead_code)] with a comment explaining why."
+        }
+        RustErrorCategory::TestFailure => {
+            "Read the assertion message carefully. Check expected vs actual values. The test logic or the code under test may need fixing."
+        }
+        RustErrorCategory::Format => {
+            "Run `cargo fmt` to auto-fix. No manual changes needed."
+        }
+        RustErrorCategory::Clippy => {
+            "Read the clippy suggestion — most have a direct fix. Apply the suggestion or add #[allow(clippy::...)] if the lint is a false positive."
+        }
+        RustErrorCategory::Unknown => {
+            "Read the error message carefully and fix the root cause."
+        }
+    }
+}
+
+/// Classify a Rust error output line into a category.
+/// Scans for keyword patterns in compiler/clippy/test output.
+pub fn classify_rust_error(output: &str) -> Vec<(RustErrorCategory, usize)> {
+    let mut counts: std::collections::HashMap<RustErrorCategory, usize> =
+        std::collections::HashMap::new();
+
+    for line in output.lines() {
+        let lower = line.to_lowercase();
+
+        if lower.contains("cannot find")
+            || lower.contains("unresolved import")
+            || lower.contains("no function or associated item named")
+            || lower.contains("not found in")
+            || lower.contains("module not found")
+        {
+            *counts.entry(RustErrorCategory::MissingImport).or_insert(0) += 1;
+        } else if lower.contains("mismatched types")
+            || (lower.contains("expected")
+                && lower.contains("found")
+                && (lower.contains("type")
+                    || lower.contains("struct")
+                    || lower.contains("enum")
+                    || lower.contains("e0308")))
+        {
+            *counts.entry(RustErrorCategory::TypeMismatch).or_insert(0) += 1;
+        } else if lower.contains("borrow")
+            || lower.contains("lifetime")
+            || lower.contains("moved")
+            || lower.contains("cannot move")
+            || lower.contains("does not live long enough")
+        {
+            *counts.entry(RustErrorCategory::BorrowChecker).or_insert(0) += 1;
+        } else if lower.contains("unused")
+            || lower.contains("dead_code")
+            || lower.contains("never read")
+            || lower.contains("never used")
+        {
+            *counts.entry(RustErrorCategory::Unused).or_insert(0) += 1;
+        } else if lower.contains("test result: failed")
+            || lower.contains("panicked at")
+            || (lower.contains("assertion") && lower.contains("failed"))
+        {
+            *counts.entry(RustErrorCategory::TestFailure).or_insert(0) += 1;
+        } else if lower.contains("diff") && lower.contains("rustfmt") {
+            *counts.entry(RustErrorCategory::Format).or_insert(0) += 1;
+        } else if lower.contains("clippy::") || lower.contains("clippy warning") {
+            *counts.entry(RustErrorCategory::Clippy).or_insert(0) += 1;
+        }
+    }
+
+    if counts.is_empty() {
+        counts.insert(RustErrorCategory::Unknown, 1);
+    }
+
+    let mut result: Vec<(RustErrorCategory, usize)> = counts.into_iter().collect();
+    result.sort_by(|a, b| b.1.cmp(&a.1));
+    result
+}
+
 /// Build a prompt describing health check failures for the AI to fix.
+/// Includes error classification and strategy hints for Rust projects.
 pub fn build_fix_prompt(failures: &[(&str, &str)]) -> String {
     if failures.is_empty() {
         return String::new();
@@ -527,7 +655,29 @@ pub fn build_fix_prompt(failures: &[(&str, &str)]) -> String {
         "Fix the following build/lint errors in this project. Read the relevant files, understand the errors, and apply fixes:\n\n",
     );
     for (name, output) in failures {
-        prompt.push_str(&format!("## {name} errors:\n```\n{output}\n```\n\n"));
+        // Classify errors for Rust projects
+        let categories = classify_rust_error(output);
+        let cat_summary: Vec<String> = categories
+            .iter()
+            .map(|(cat, count)| format!("{cat} ({count})"))
+            .collect();
+
+        prompt.push_str(&format!("## {name} errors:\n"));
+        prompt.push_str(&format!(
+            "**Error categories:** {}\n",
+            cat_summary.join(", ")
+        ));
+
+        // Add strategy hints for top categories
+        for (cat, _) in categories.iter().take(2) {
+            prompt.push_str(&format!(
+                "**Strategy for {}:** {}\n",
+                cat,
+                fix_strategy(*cat)
+            ));
+        }
+
+        prompt.push_str(&format!("\n```\n{output}\n```\n\n"));
     }
     prompt.push_str(
         "After fixing, run the failing checks again to verify. Fix any remaining issues.",
