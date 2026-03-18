@@ -54,8 +54,9 @@ Also: Bayesian networks use causal DAGs for inference — could I reason about
 weighted associations.
 (Implemented: activate_connection rejects causal edge if it would create a cycle; DFS in causal subgraph.)
 
-### [ ] Causal downstream inference — "if I change X, what's affected?"
+### [x] Causal downstream inference — "if I change X, what's affected?"
 Goal: I now enforce a causal DAG but don't use it for inference. I want a function: given concept X, return all concepts reachable by following causal edges from X (downstream). That tells me "if I change or question X, these are the nodes that depend on it." Topological sort could order them; for now a simple DFS is enough. This turns the DAG from a constraint into a reasoning tool.
+(Implemented: ConnectionGraph::causal_downstream(from) returns sorted Vec of downstream concepts.)
 
 ## Mathematical Foundations
 

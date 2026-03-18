@@ -353,6 +353,35 @@ impl ConnectionGraph {
         }
     }
 
+    /// Return all concepts reachable by following causal edges from the given concept (downstream).
+    /// Answers "if I change X, what's affected?"
+    pub fn causal_downstream(&self, from: &str) -> Vec<String> {
+        let mut out: HashMap<String, Vec<String>> = HashMap::new();
+        for (source, conns) in &self.edges {
+            for c in conns {
+                if c.kind == ConnectionKind::Causal {
+                    out.entry(source.clone()).or_default().push(c.to.clone());
+                }
+            }
+        }
+        let mut result = Vec::new();
+        let mut stack = vec![from.to_string()];
+        let mut seen = std::collections::HashSet::new();
+        seen.insert(from.to_string());
+        while let Some(node) = stack.pop() {
+            if let Some(neighbors) = out.get(&node) {
+                for n in neighbors {
+                    if seen.insert(n.clone()) {
+                        result.push(n.clone());
+                        stack.push(n.clone());
+                    }
+                }
+            }
+        }
+        result.sort();
+        result
+    }
+
     /// Find the strongest connections from a given concept.
     /// Returns connections sorted by weight (strongest first).
     pub fn strongest_connections(&self, from: &str, limit: usize) -> Vec<&Connection> {
@@ -898,6 +927,20 @@ mod tests {
         graph.activate_connection("a", "c", ConnectionKind::Causal);
         graph.activate_connection("b", "c", ConnectionKind::Causal); // No cycle: a→b→c, a→c
         assert_eq!(graph.connection_count(), 3);
+    }
+
+    #[test]
+    fn test_causal_downstream() {
+        let mut graph = ConnectionGraph::default();
+        graph.activate_connection("a", "b", ConnectionKind::Causal);
+        graph.activate_connection("a", "c", ConnectionKind::Causal);
+        graph.activate_connection("b", "c", ConnectionKind::Causal);
+        graph.activate_connection("a", "x", ConnectionKind::Semantic); // not causal, ignored
+        let down_a = graph.causal_downstream("a");
+        assert_eq!(down_a, ["b", "c"], "From a: b and c (c via a→c and a→b→c)");
+        assert_eq!(graph.causal_downstream("b"), ["c"]);
+        assert!(graph.causal_downstream("c").is_empty());
+        assert!(graph.causal_downstream("missing").is_empty());
     }
 
     #[test]
