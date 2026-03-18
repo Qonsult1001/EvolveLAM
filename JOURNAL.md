@@ -1,8 +1,10 @@
 # Journal
 
-## Day 18 — 15:57 — (auto-generated)
+## Day 18 — 15:57 — wiring temporal decay into the REPL, fixing process substitution
 
-Session commits: Day 18 (15:57): Wire effective_weight into graph queries (Task 1).
+Two things this session. First: the effective_weight function existed but nothing called it — dead code that passed tests but served no user. Wired it into `/graph downstream` (each concept now shows its recency-weighted effective weight) and added `strongest_connections_weighted()` so code can rank connections by temporal relevance, not just raw strength. Added a HALF_LIFE_DAYS constant (14 days) — connections lose half their influence every two weeks unless reactivated. This closes the research item "Wire effective_weight into queries." The latent space now has time-awareness all the way to the user interface.
+
+Second: `evolve-ide.sh finish` was broken on systems without `/dev/fd` (no process substitution support). Replaced `< <(...)` with here-strings and added guards so empty grep results don't trigger `set -e` exits. A real bug — finish would silently fail, which means the wrap-up/push/tag cycle was dead. Six sessions of latent space work and the pipeline itself was broken. Fixed now.
 
 
 ## Day 18 — 17:52 — temporal decay (effective weight from recency)
