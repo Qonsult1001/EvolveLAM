@@ -159,16 +159,23 @@ yoyo --yes
 
 ### Run self-evolution from your IDE
 
-To trigger yoyo's self-improvement loop from inside any IDE agent (Claude Code,
-Cursor, Windsurf, etc.) — no API key needed, the IDE provides the LLM:
+To trigger yoyo's self-improvement loop from inside any IDE agent — no API key
+needed, the IDE provides the LLM:
 
+**Claude Code** (fully autonomous):
+```
+/project:evolve
+```
+That's it. The custom slash command drives the entire pipeline — setup, read source,
+plan, implement tasks, verify, reply to issues, journal, push. No manual steps.
+
+**Other IDEs** (Cursor, Windsurf, etc.):
 ```bash
-# Autonomous (recommended) — one command, full evolution cycle
 ./scripts/evolve-ide.sh all
-# Then read .evolve/runbook.md and follow it end-to-end
+# Then follow the instructions printed to stdout
 ```
 
-The `all` command does the same thing as `evolve.sh` but uses your IDE as the brain:
+The full pipeline:
 
 1. **Setup** (automatic) — verifies build, checks CI status, fetches GitHub issues
    (community, self-filed, help-wanted), scans for pending replies, loads identity context
@@ -176,9 +183,6 @@ The `all` command does the same thing as `evolve.sh` but uses your IDE as the br
 3. **Plan** — IDE creates `SESSION_PLAN.md` with tasks + issue responses
 4. **Task loop** — for each task: `next-task` → implement → `verify-task` (auto-reverts on failure)
 5. **Finish** — posts replies to GitHub issues, verifies final build, writes journal, tags, pushes
-
-The full pipeline is written to `.evolve/runbook.md` — the IDE reads it once and
-executes everything autonomously.
 
 For manual step-by-step control:
 
@@ -284,17 +288,15 @@ Every 4-8 hours, yoyo wakes up and:
 ### IDE Mode (`evolve-ide.sh`) — Autonomous, runs inside your coding agent
 
 When you run yoyo's evolution from inside an IDE agent (Claude Code, Cursor, etc.),
-there's no need for the yoyo binary as a middleman — the IDE agent already has all
-the tools. `evolve-ide.sh` handles all bash infrastructure and outputs structured
-prompts for the IDE agent to execute.
+there's no need for the yoyo binary — the IDE agent already has all the tools.
 
-```bash
-./scripts/evolve-ide.sh all
-# Then: read .evolve/runbook.md and follow it end-to-end
-```
+In Claude Code, just type `/project:evolve` — a custom slash command
+(`.claude/commands/evolve.md`) drives the entire cycle autonomously.
 
-The `all` command runs setup and writes a single runbook (`.evolve/runbook.md`)
-that drives the IDE agent through the full evolution pipeline:
+For other IDEs, `./scripts/evolve-ide.sh` provides the infrastructure
+(build checks, issue fetching, verification gates, rollbacks, issue posting,
+tagging, pushing) while the IDE agent handles the LLM work (reading code,
+planning, implementing, committing).
 
 ```
 The IDE agent wakes up and:
