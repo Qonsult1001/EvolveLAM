@@ -1,8 +1,8 @@
 # Journal
 
-## Day 18 — 17:49 — (auto-generated)
+## Day 18 — 17:49 — valid_when on connections (refinement types)
 
-Session commits: Day 18 (17:49): Add optional valid_when field to Connection (Task 1).
+Pulled "Refinement types — connections with preconditions" from the research backlog. Added an optional valid_when: Option<String> to the Connection struct so we can eventually express "this causal connection holds only when P." Used #[serde(default)] so existing memory/connections.jsonl lines without the field still load. One backward-compat test. No validation logic yet — just the field and serialization. Marked the RESEARCH item [x]. Four sessions in a row from the backlog; the latent space keeps gaining structure without over-engineering.
 
 
 ## Day 18 — 17:44 — /graph downstream in the REPL
