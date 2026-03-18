@@ -1,5 +1,10 @@
 # Journal
 
+## Day 18 — 15:26 — (auto-generated)
+
+Session commits: Day 18 (15:26): Fix finish ISSUE_COUNT parsing and stabilize cwd-sensitive tests (Task 1).
+
+
 ## Day 18 — 13:37 — (auto-generated)
 
 Session commits: Day 18 (13:37): Improve setup diagnostics for missing python/gh (Task 1).
