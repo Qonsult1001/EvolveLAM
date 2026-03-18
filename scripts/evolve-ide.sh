@@ -294,9 +294,11 @@ Then STOP. Plan only — do not implement.
 PLANEOF
 
     echo "→ Setup complete. Planning prompt written to $EVOLVE_DIR/plan_prompt.md"
-    echo ""
-    echo "NEXT: Read $EVOLVE_DIR/plan_prompt.md and act on it (create SESSION_PLAN.md)."
-    echo "Then run: ./scripts/evolve-ide.sh next-task"
+    if [ "${EVOLVE_IDE_QUIET:-}" != "1" ]; then
+        echo ""
+        echo "NEXT: Read $EVOLVE_DIR/plan_prompt.md and act on it (create SESSION_PLAN.md)."
+        echo "Then run: ./scripts/evolve-ide.sh next-task"
+    fi
 }
 
 # ── PHASE: next-task ──
@@ -840,138 +842,99 @@ case "${1:-help}" in
         phase_finish
         ;;
     all)
-        # Run setup (build check, CI, issues) then output a single runbook
-        # that the IDE agent follows autonomously end-to-end.
-        phase_setup
+        # Run setup (build check, CI, issues) then output the full runbook
+        # directly to stdout so the IDE agent acts on it immediately.
+        EVOLVE_IDE_QUIET=1 phase_setup
 
-        # Build the runbook: full pipeline instructions + plan prompt inline
-        cat > "$EVOLVE_DIR/runbook.md" <<'RUNBOOK_HEADER'
-# Autonomous Evolution Runbook
+        # Also save to file for reference
+        {
+        cat <<'RUNBOOK_HEADER'
 
-This runbook drives a full evolution cycle — the same pipeline as evolve.sh
-but with you (the IDE agent) as the LLM instead of the yoyo binary.
+=========================================================================
+AUTONOMOUS EVOLUTION — FOLLOW THESE INSTRUCTIONS NOW. DO NOT STOP.
+=========================================================================
 
-Follow these steps IN ORDER. Do not skip any step. Do not stop until Step 7.
+Setup is complete. You MUST now execute Steps 1-7 below autonomously.
+Do not ask the user for permission. Do not stop to summarize. Just do it.
 
----
+--- STEP 1: READ YOUR OWN SOURCE CODE ---
 
-## What already happened (setup phase)
+Read and understand your current state. Read these files NOW:
+- ALL files under src/ (your source code)
+- JOURNAL.md (last 5 entries — what you did recently)
+- ISSUES_TODAY.md (community issues fetched during setup)
+- memory/active_learnings.md if it exists (your accumulated wisdom)
 
-The setup phase just ran and completed these steps:
-- ✅ Verified build passes (cargo build + cargo test)
-- ✅ Checked previous CI status for failures
-- ✅ Fetched GitHub issues (community `agent-input`, self `agent-self`, `agent-help-wanted`)
-- ✅ Scanned for pending replies on previously touched issues
-- ✅ Loaded identity context (IDENTITY.md, PERSONALITY.md, learnings)
-- ✅ Wrote the planning prompt (included below)
+Note friction, bugs, gaps, and opportunities as you read.
 
-Issues are in ISSUES_TODAY.md. Everything is ready for you to plan.
+--- STEP 2: CREATE THE SESSION PLAN ---
 
----
-
-## Step 1: Read your own source code
-
-Before planning, read and understand your current state:
-- Read ALL files under `src/` (your source code)
-- Read `JOURNAL.md` (last 5 entries — what you did recently)
-- Read `ISSUES_TODAY.md` (community issues fetched during setup)
-- Read `memory/active_learnings.md` if it exists (your accumulated wisdom)
-
-This is your self-assessment phase. Note friction, bugs, gaps, and opportunities.
-
----
-
-## Step 2: Create the Session Plan
-
-Now act on the planning prompt below. Your deliverable is SESSION_PLAN.md.
+Act on the planning prompt below. Your deliverable is SESSION_PLAN.md.
+Commit it when done: git add SESSION_PLAN.md && git commit -m "Day N (HH:MM): session plan"
 
 RUNBOOK_HEADER
 
-        # Inline the plan prompt content
-        cat "$EVOLVE_DIR/plan_prompt.md" >> "$EVOLVE_DIR/runbook.md"
+        # Inline the plan prompt so the IDE has everything in one output
+        cat "$EVOLVE_DIR/plan_prompt.md"
 
-        cat >> "$EVOLVE_DIR/runbook.md" <<'RUNBOOK_REST'
+        cat <<'RUNBOOK_REST'
 
----
+--- STEP 3: TASK LOOP — IMPLEMENT EACH TASK ---
 
-## Step 3: Task Loop — Make changes, run tests, commit or revert
+For each task in SESSION_PLAN.md, run this loop:
 
-After creating and committing SESSION_PLAN.md, implement each task:
-
-```
-REPEAT:
   a. Run: ./scripts/evolve-ide.sh next-task
   b. If output says "No more tasks" or "done" → go to Step 4
-  c. Read .evolve/task_prompt.md and implement the task described in it
+  c. Read .evolve/task_prompt.md and implement the task it describes
+     - Write a test first if possible
+     - Use edit_file for surgical changes (don't rewrite entire files)
+     - Run: cargo fmt && cargo clippy --all-targets -- -D warnings && cargo build && cargo test
+     - Fix errors. If stuck after 3 tries: git checkout -- .
+     - Commit after all checks pass
   d. Run: ./scripts/evolve-ide.sh verify-task
-     → If VERIFIED OK: task is done, move on
-     → If REVERTED: task failed verification, it was auto-reverted. Move on.
+     - VERIFIED OK → move on
+     - REVERTED → task failed, it was auto-reverted and an issue was filed. Move on.
   e. Go back to (a)
-```
 
-For each task:
-- Read the task prompt carefully — it tells you exactly what to implement
-- Write a test first if possible
-- Use edit_file for surgical changes (don't rewrite entire files)
-- Run: cargo fmt && cargo clippy --all-targets -- -D warnings && cargo build && cargo test
-- Fix errors. If stuck after 3 tries, revert: git checkout -- .
-- Commit after each task passes all checks
-- Do NOT skip verify-task — it checks for protected files, build, and tests.
-  If verification fails, the task is auto-reverted and an issue is filed.
-
----
-
-## Step 4: Finish — Issue responses, journal, tag, push
+--- STEP 4: FINISH — ISSUE RESPONSES, JOURNAL, TAG, PUSH ---
 
 Run: ./scripts/evolve-ide.sh finish
 
-This does everything evolve.sh does at the end:
-- **Extracts issue responses** from SESSION_PLAN.md's "### Issue Responses" section
-- **Posts replies to GitHub issues** as 🐙 yoyo-evolve (commenting, closing fixed/wontfix)
-- **Verifies the final build** (auto-fixes formatting with cargo fmt)
-- **Writes a fallback journal entry** if you haven't written one
-- **Tags** the known-good state (e.g., day42-14-30)
-- **Pushes** to the designated branch
+This will:
+- Extract issue responses from SESSION_PLAN.md
+- Post replies to GitHub issues as 🐙 yoyo-evolve (comment + close fixed/wontfix)
+- Verify the final build (auto-fix formatting)
+- Write a fallback journal entry if needed
+- Tag the known-good state
+- Push to the designated branch
 
 If finish reports build errors and writes .evolve/fix_prompt.md:
-- Read .evolve/fix_prompt.md and fix the errors
-- Re-run: ./scripts/evolve-ide.sh finish
+  → Read .evolve/fix_prompt.md, fix the errors, re-run: ./scripts/evolve-ide.sh finish
 
----
-
-## Step 5: Journal Entry
+--- STEP 5: JOURNAL ENTRY ---
 
 If .evolve/journal_prompt.md exists after finish, read it and write a journal entry.
-Match the voice in existing JOURNAL.md entries. Prepend the new entry at the top.
+Match the voice in existing JOURNAL.md entries. Prepend at top.
 Commit: git add JOURNAL.md && git commit -m "Day N (HH:MM): journal entry"
 
----
+--- STEP 6: REFLECTION & LEARNINGS ---
 
-## Step 6: Reflection & Learnings
+If .evolve/reflect_prompt.md exists, read it. If genuinely novel insight
+(not code patterns — about yourself, your process, your growth), append one
+JSONL line to memory/learnings.jsonl via python3 json.dumps(). Otherwise skip.
 
-If .evolve/reflect_prompt.md exists, read it. If you had a genuinely novel insight
-(not just code patterns — something about yourself, your process, or your growth),
-append one JSONL line to memory/learnings.jsonl via python3 json.dumps().
-If nothing novel, skip this step.
+--- STEP 7: DONE ---
 
----
+Report what was accomplished:
+- How many tasks completed vs reverted
+- Which issues addressed and how (implemented/wontfix/partial/reply)
+- Any insights from this session
 
-## Step 7: Done
-
-The evolution session is complete. Report:
-- How many tasks were completed vs reverted
-- Which issues were addressed and how (implemented/wontfix/partial/reply)
-- Any insights or learnings from this session
+=========================================================================
+BEGIN NOW. Start with Step 1 — read your source files.
+=========================================================================
 RUNBOOK_REST
-
-        echo ""
-        echo "========================================="
-        echo "→ Runbook written to $EVOLVE_DIR/runbook.md"
-        echo ""
-        echo "READ $EVOLVE_DIR/runbook.md AND FOLLOW IT END-TO-END."
-        echo "It contains the full pipeline: read source → plan → implement →"
-        echo "verify → reply to issues → journal → push."
-        echo "========================================="
+        } | tee "$EVOLVE_DIR/runbook.md"
         ;;
     help|--help|-h)
         echo "Usage: ./scripts/evolve-ide.sh <command>"
