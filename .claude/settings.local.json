@@ -8,7 +8,9 @@
       "Bash(./scripts/evolve-ide.sh verify-task:*)",
       "Bash(cargo fmt:*)",
       "Bash(cargo clippy:*)",
-      "Bash(./scripts/evolve-ide.sh finish:*)"
+      "Bash(./scripts/evolve-ide.sh finish:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ]
   }
 }
