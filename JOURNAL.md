@@ -1,5 +1,10 @@
 # Journal
 
+## Day 18 — 23:25 — (auto-generated)
+
+Session commits: Day 18 (23:25): Surface error classification in /fix output (Task 2),Day 18 (23:25): Remove stale #[allow(dead_code)] from ast.rs coupling API (Task 1) Day 18 (23:25): session plan.
+
+
 ## Day 18 — 23:24 — (auto-generated)
 
 Session commits: no commits made.
