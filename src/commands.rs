@@ -2668,6 +2668,22 @@ mod tests {
     }
 
     #[test]
+    fn test_known_models_includes_current_claude_ids() {
+        assert!(
+            KNOWN_MODELS.contains(&"claude-opus-4-6"),
+            "Should include claude-opus-4-6"
+        );
+        assert!(
+            KNOWN_MODELS.contains(&"claude-sonnet-4-6"),
+            "Should include claude-sonnet-4-6"
+        );
+        assert!(
+            KNOWN_MODELS.contains(&"claude-haiku-4-5-20251001"),
+            "Should include claude-haiku-4-5-20251001"
+        );
+    }
+
+    #[test]
     fn test_arg_completions_think_empty() {
         let candidates = command_arg_completions("/think", "");
         assert_eq!(candidates.len(), 5, "Should return all 5 thinking levels");
