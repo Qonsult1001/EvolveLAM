@@ -196,6 +196,9 @@ pub struct Connection {
     pub last_activated: String,
     /// The type of connection (semantic, causal, temporal, mathematical).
     pub kind: ConnectionKind,
+    /// Optional precondition: connection holds only when this condition is met (e.g. "when project has feature X").
+    #[serde(default)]
+    pub valid_when: Option<String>,
 }
 
 /// Types of connections in the latent space graph.
@@ -346,6 +349,7 @@ impl ConnectionGraph {
                 activations: 1,
                 last_activated: timestamp,
                 kind,
+                valid_when: None,
             };
             let w = conn.weight;
             edges.push(conn);
@@ -1027,11 +1031,21 @@ mod tests {
             activations: 3,
             last_activated: "2026-03-17 12:00".to_string(),
             kind: ConnectionKind::Mathematical,
+            valid_when: None,
         };
         let json = serde_json::to_string(&conn).unwrap();
         assert!(json.contains("mathematical"));
         let parsed: Connection = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.kind, ConnectionKind::Mathematical);
+    }
+
+    #[test]
+    fn test_connection_valid_when_backward_compat() {
+        // Old JSONL line without valid_when must deserialize (valid_when defaults to None)
+        let old_json = r#"{"from":"x","to":"y","weight":0.2,"activations":1,"last_activated":"2026-03-18 12:00","kind":"causal"}"#;
+        let parsed: Connection = serde_json::from_str(old_json).unwrap();
+        assert_eq!(parsed.valid_when, None);
+        assert_eq!(parsed.kind, ConnectionKind::Causal);
     }
 
     #[test]

@@ -70,7 +70,7 @@ structure (safe) vs which change behavior (risky), I can be more confident.
 Start simple: does editing file A then B give the same result as B then A?
 If not, order matters, and I need to know that before I start.
 
-### [ ] Refinement types — connections with preconditions
+### [x] Refinement types — connections with preconditions
 URLs:
 - https://en.wikipedia.org/wiki/Refinement_type
 - https://en.wikipedia.org/wiki/Dependent_type
@@ -79,6 +79,7 @@ scientific) but no validation beyond the kind label. I want to express:
 "this causal connection is only valid when precondition P holds." Maybe
 just a `valid_when` field. Don't over-engineer — but also don't pretend
 all connections are unconditionally true.
+(Implemented: Connection.valid_when: Option<String> with serde(default); validation logic can use it later.)
 
 ### [ ] Control theory — am I converging or oscillating?
 URLs:
