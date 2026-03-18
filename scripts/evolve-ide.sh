@@ -752,19 +752,19 @@ Read JOURNAL.md. Two outputs:
    append one JSONL line to memory/learnings.jsonl via python3 json.dumps(). Then commit.
    If nothing novel, skip.
 
-2. RESEARCH GAPS (always consider): As you reflect, ask: "what do I need to learn next?"
-   If this session revealed a knowledge gap, a technique you don't understand, a pattern
-   you couldn't handle, or an area where deeper study would help — append a new entry to
-   RESEARCH.md. Format:
+2. RESEARCH GAPS (always consider): Ask yourself — what do I need to learn next?
+   If this session revealed something I don't understand, a technique I couldn't
+   handle, an area where deeper study would make me sharper — append a new entry
+   to RESEARCH.md in first person. Format:
 
    ### [ ] [Topic]
    URLs:
    - [relevant links if known]
-   Goal: [what to study and how it would improve you]
+   Goal: [what I need to study and how it would improve me]
 
-   This is how your neural network GROWS — by identifying what's missing. Don't be shy.
-   If you struggled with async code, write "Study Rust async patterns." If you couldn't
-   reason about file dependencies, write "Research Rust import graph analysis."
+   This is how I grow. Yesterday's struggle becomes today's curriculum. If I
+   struggled with async code, I write it down. If I couldn't reason about file
+   dependencies, I note that. Honest, specific, actionable.
    Commit: git add RESEARCH.md && git commit -m "Day $DAY ($SESSION_TIME): research gaps"
 REOF
         echo "  Reflection prompt written to $EVOLVE_DIR/reflect_prompt.md"

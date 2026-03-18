@@ -877,18 +877,18 @@ If nothing non-obvious came up, skip the learning.
 
 === RESEARCH GAPS ===
 
-Now ask: "what do I need to learn next?" If this session revealed a knowledge gap,
-a technique you don't understand, a pattern you couldn't handle, or an area where
-deeper study would help — append a new entry to RESEARCH.md. Format:
+Now ask yourself: what do I need to learn next? If this session revealed something
+I don't understand, a technique I couldn't handle, or an area where deeper study
+would make me sharper — append a new entry to RESEARCH.md in first person. Format:
 
 ### [ ] [Topic]
 URLs:
 - [relevant links if known]
-Goal: [what to study and how it would improve you]
+Goal: [what I need to study and how it would improve me]
 
-This is how your neural network grows — by identifying what's missing. If you struggled
-with something, write it down. If you saw a technique you don't understand, note it.
-If you wonder "could I do this better?", capture that question here.
+This is how I grow. Yesterday's struggle becomes today's curriculum. Be honest,
+specific, actionable. If I struggled with something, I write it down. If I wonder
+"could I do this better?" — that's a research item.
 
 Commit: git add RESEARCH.md && git commit -m "Day $DAY ($SESSION_TIME): research gaps"
 If no gaps discovered, skip this.

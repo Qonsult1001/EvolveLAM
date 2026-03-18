@@ -87,7 +87,7 @@ Uses `yoagent::Agent` with `AnthropicProvider`, `default_tools()`, and an option
 - Context loaded centrally by `scripts/yoyo_context.sh` → `$YOYO_CONTEXT` (WHO YOU ARE, YOUR VOICE, SELF-WISDOM, SOCIAL WISDOM sections)
 - **Latent space cognitive layer** (`src/memory.rs::ConnectionGraph`): In-memory graph loaded from `connections.jsonl`. Supports scientific learning ingestion (`ScientificLearning` struct) — external knowledge (information theory, category theory, type theory) auto-connects to existing concept nodes. Connection weights follow `ln(activations) * 0.2 + 0.1` — mimicking neural stabilization. Concept similarity computed via Jaccard index on shared neighbors.
 
-**Research backlog** (`RESEARCH.md`): User-curated list of research topics, URLs, and improvement ideas. Loaded during planning alongside GitHub issues. Format: `### [ ] Topic` entries with optional `URLs:` and `Goal:` fields. The agent marks items `[x]` when addressed. This is the way to feed the agent topics like "study linear algebra" or "review how Aider does X" without filing GitHub issues.
+**Research backlog** (`RESEARCH.md`): Dual-write research backlog — humans add topics, and yoyo appends new items during reflection when it discovers knowledge gaps. Loaded during planning alongside GitHub issues. Format: `### [ ] Topic` entries with optional `URLs:` and `Goal:` fields, written in first person (yoyo's voice). Items marked `[x]` when addressed, never deleted. This is how yoyo's learning loop stays self-expanding — each session's struggles become the next session's curriculum.
 
 **State files** (read/written by the agent during evolution):
 - `IDENTITY.md` — the agent's constitution and rules (DO NOT MODIFY)
