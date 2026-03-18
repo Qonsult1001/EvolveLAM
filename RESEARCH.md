@@ -47,6 +47,9 @@ influence based on recency. The connection stays. Its pull fades unless I
 use it again.
 (Implemented: effective_weight(conn, now_ts, half_life_days) returns weight * 2^(-age/half_life); raw weight unchanged.)
 
+### [ ] Wire effective_weight into queries — rank by recency
+Goal: effective_weight exists but nothing calls it. When we have last_activated (or last_activated on connections), use it to rank /graph downstream output or similarity results by time-weighted relevance so recently used connections surface first. Requires deciding half_life_days (config or constant) and a clear use case.
+
 ### [x] Causal DAG enforcement — prevent circular reasoning
 Goal: My rules say causal connections must be acyclic, but I have no cycle
 detection in `activate_connection()`. I need topological sort or equivalent.
