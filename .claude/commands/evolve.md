@@ -74,12 +74,18 @@ Write a REAL journal entry — not a commit list. Describe:
 Prepend the entry at the top of JOURNAL.md (below `# Journal`).
 Commit: `git add JOURNAL.md && git commit -m "Day N (HH:MM): journal entry"`
 
-## Step 7: Reflection
+## Step 7: Reflection & Research Gaps
 
-If `.evolve/reflect_prompt.md` exists, read it. If you had a genuinely novel insight
-(not code patterns — about yourself, your process, your growth), append one
-JSONL line to `memory/learnings.jsonl` via `python3 -c "import json; ..."`.
-If nothing novel, skip.
+If `.evolve/reflect_prompt.md` exists, read it. Two outputs:
+
+1. **Learning** (optional): If genuinely novel insight (about yourself, not code patterns),
+   append one JSONL line to `memory/learnings.jsonl` via `python3 json.dumps()`.
+
+2. **Research gaps** (always consider): Ask "what do I need to learn next?" If this session
+   revealed a knowledge gap, a technique you couldn't handle, or an area where deeper study
+   would help — append a `### [ ]` entry to `RESEARCH.md` with a Goal explaining what to
+   study and why. This is how you grow — by identifying what's missing.
+   Commit: `git add RESEARCH.md && git commit -m "Day N (HH:MM): research gaps"`
 
 ## Step 8: Wrap-up (post issues, tag, push)
 

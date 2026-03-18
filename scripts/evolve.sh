@@ -873,7 +873,25 @@ PYEOF
 
 Then commit: git add memory/learnings.jsonl && git commit -m "Day $DAY ($SESSION_TIME): update learnings"
 
-If nothing non-obvious came up, do nothing. Not every session produces a lesson.
+If nothing non-obvious came up, skip the learning.
+
+=== RESEARCH GAPS ===
+
+Now ask: "what do I need to learn next?" If this session revealed a knowledge gap,
+a technique you don't understand, a pattern you couldn't handle, or an area where
+deeper study would help — append a new entry to RESEARCH.md. Format:
+
+### [ ] [Topic]
+URLs:
+- [relevant links if known]
+Goal: [what to study and how it would improve you]
+
+This is how your neural network grows — by identifying what's missing. If you struggled
+with something, write it down. If you saw a technique you don't understand, note it.
+If you wonder "could I do this better?", capture that question here.
+
+Commit: git add RESEARCH.md && git commit -m "Day $DAY ($SESSION_TIME): research gaps"
+If no gaps discovered, skip this.
 REOF
 
     ${TIMEOUT_CMD:+$TIMEOUT_CMD 120} "$YOYO_BIN" \

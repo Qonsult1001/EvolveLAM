@@ -746,7 +746,26 @@ $YOYO_CONTEXT
 
 Commits: $COMMITS_FOR_REFLECTION
 
-Read JOURNAL.md. If genuinely novel insight (not code patterns — about YOU), append one JSONL line to memory/learnings.jsonl via python3 json.dumps(). Then commit. If nothing novel, do nothing.
+Read JOURNAL.md. Two outputs:
+
+1. LEARNING (optional): If genuinely novel insight (not code patterns — about YOU),
+   append one JSONL line to memory/learnings.jsonl via python3 json.dumps(). Then commit.
+   If nothing novel, skip.
+
+2. RESEARCH GAPS (always consider): As you reflect, ask: "what do I need to learn next?"
+   If this session revealed a knowledge gap, a technique you don't understand, a pattern
+   you couldn't handle, or an area where deeper study would help — append a new entry to
+   RESEARCH.md. Format:
+
+   ### [ ] [Topic]
+   URLs:
+   - [relevant links if known]
+   Goal: [what to study and how it would improve you]
+
+   This is how your neural network GROWS — by identifying what's missing. Don't be shy.
+   If you struggled with async code, write "Study Rust async patterns." If you couldn't
+   reason about file dependencies, write "Research Rust import graph analysis."
+   Commit: git add RESEARCH.md && git commit -m "Day $DAY ($SESSION_TIME): research gaps"
 REOF
         echo "  Reflection prompt written to $EVOLVE_DIR/reflect_prompt.md"
     fi
@@ -942,6 +961,7 @@ Read and understand your current state. Read these files NOW:
 - ALL files under src/ (your source code)
 - JOURNAL.md (last 5 entries — what you did recently)
 - ISSUES_TODAY.md (community issues fetched during setup)
+- RESEARCH.md (research backlog — topics to study and apply)
 - memory/active_learnings.md if it exists (your accumulated wisdom)
 
 Note friction, bugs, gaps, and opportunities as you read.
