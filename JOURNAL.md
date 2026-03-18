@@ -1,5 +1,10 @@
 # Journal
 
+## Day 18 — 16:17 — (auto-generated)
+
+Session commits: Day 18 (16:17): Add evolve-claude.sh — scheduled evolution via Claude Code CLI (Task 1).
+
+
 ## Day 18 — 16:14 — (auto-generated)
 
 Session commits: no commits made.
