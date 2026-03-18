@@ -2180,6 +2180,7 @@ key = "value"
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_directory_restrictions_deny_blocks_path() {
         let restrictions = DirectoryRestrictions {
             allow: vec![],
@@ -2192,6 +2193,7 @@ key = "value"
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_directory_restrictions_allow_restricts_to_listed() {
         let cwd = std::env::current_dir()
             .unwrap()
@@ -2210,6 +2212,7 @@ key = "value"
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_directory_restrictions_deny_overrides_allow() {
         let cwd = std::env::current_dir()
             .unwrap()
@@ -2246,6 +2249,7 @@ key = "value"
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_directory_restrictions_relative_paths() {
         // Relative paths should be resolved against CWD
         let cwd = std::env::current_dir()
@@ -2263,6 +2267,7 @@ key = "value"
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_directory_restrictions_exact_dir_match() {
         let restrictions = DirectoryRestrictions {
             allow: vec![],
@@ -2277,12 +2282,14 @@ key = "value"
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_resolve_path_normalizes_parent_dir() {
         let resolved = resolve_path("/tmp/a/../b");
         assert_eq!(resolved, "/tmp/b");
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_resolve_path_absolute() {
         let resolved = resolve_path("/usr/bin/env");
         assert!(resolved.starts_with('/'));

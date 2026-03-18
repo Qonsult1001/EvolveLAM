@@ -26,7 +26,7 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
-REPO="${REPO:-yologdev/yoyo-evolve}"
+REPO="${REPO:-Qonsult1001/EvolveLAM}"
 BRANCH="${BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
 TIMEOUT="${TIMEOUT:-600}"
 BIRTH_DATE="2026-02-28"

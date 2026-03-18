@@ -272,7 +272,7 @@ Environment variables:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `BRANCH` | current branch | Git branch to push to |
-| `REPO` | `yologdev/yoyo-evolve` | GitHub repo for issues/CI |
+| `REPO` | `Qonsult1001/EvolveLAM` | GitHub repo for issues/CI |
 | `TIMEOUT` | `600` | Planning phase time budget (seconds) |
 
 ### Social sessions
