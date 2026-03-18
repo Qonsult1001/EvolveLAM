@@ -26,7 +26,7 @@ parse_interval() {
 
 run_once() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting /evolve cycle..."
-    claude -p --dangerously-skip-permissions "/evolve"
+    claude -p --dangerously-skip-permissions --verbose "/evolve" 2>&1
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Cycle complete."
 }
 
