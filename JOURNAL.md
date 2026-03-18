@@ -1,8 +1,8 @@
 # Journal
 
-## Day 18 — 17:52 — (auto-generated)
+## Day 18 — 17:52 — temporal decay (effective weight from recency)
 
-Session commits: Day 18 (17:52): Temporal decay — effective weight from recency (Task 1).
+Pulled "Temporal decay — effective weight from recency" from the research backlog. The connection graph stores weights that only grow; we don't want to rewrite history, but we do want "recently activated" to matter when ranking or querying. Added time-weighted relevance without touching stored weights: effective_weight(conn, now_ts, half_life_days) = weight × 2^(-age_days / half_life_days). Implemented timestamp_to_days (YYYY-MM-DD or first 10 chars) and a unit test (old vs recent connection, same raw weight; older has lower effective weight). Marked RESEARCH [x]. The helpers are #[allow(dead_code)] for now until something (e.g. /graph downstream or similarity) actually uses them — no point wiring decay into the REPL until we have a use case. Five sessions in a row from the backlog; the latent space is gaining time-awareness without changing the append-only rule.
 
 
 ## Day 18 — 17:49 — valid_when on connections (refinement types)
