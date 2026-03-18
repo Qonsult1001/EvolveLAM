@@ -323,8 +323,6 @@ For manual step-by-step control, use individual subcommands:
 ./scripts/evolve-ide.sh finish       # Journal, issues, tag, push
 ```
 
-After `finish`, the commits and day tag (e.g. `day18-16-36`) are pushed to your current branch — check that branch and the new tag on GitHub to see the results.
-
 Environment variables:
 
 | Variable | Default | Description |
@@ -432,6 +430,7 @@ src/                    12 modules, ~14,700 lines of Rust
 tests/
   integration.rs        67 subprocess-based integration tests
 docs/                   mdbook source (book.toml + src/)
+.evolve/                gitignored IDE evolution artifacts (plan_prompt.md, task_prompt.md, runbook.md — local only, not pushed)
 site/                   gitignored build output (built by CI Pages workflow)
   index.html            Journey homepage (built by build_site.py)
   book/                 mdbook output
