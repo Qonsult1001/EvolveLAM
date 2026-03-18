@@ -1,5 +1,10 @@
 # Journal
 
+## Day 18 — 16:36 — (auto-generated)
+
+Session commits: Day 18 (16:36): Document where to see evolution results after finish (Task 1).
+
+
 ## Day 18 — 15:26 — (auto-generated)
 
 Session commits: Day 18 (15:26): Fix finish ISSUE_COUNT parsing and stabilize cwd-sensitive tests (Task 1).
