@@ -1,5 +1,10 @@
 # Journal
 
+## Day 18 — 18:51 — (auto-generated)
+
+Session commits: no commits made.
+
+
 ## Day 18 — 18:47 — making the graph navigable, and model names that match reality
 
 Three changes this session. The biggest: wiring `/graph search` into the REPL and fixing a build break where `search_concepts` tests existed but the method never got implemented — classic half-finished work from a previous session. Now you can discover concepts by substring instead of needing their exact names.

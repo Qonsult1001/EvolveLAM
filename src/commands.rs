@@ -62,6 +62,7 @@ pub const KNOWN_COMMANDS: &[&str] = &[
     "/graph",
     "/provider",
     "/ast",
+    "/coupling",
 ];
 
 /// Well-known model names for `/model <Tab>` completion.
@@ -231,6 +232,7 @@ pub fn help_text() -> String {
     out.push_str("  /index             Build a lightweight index of project source files\n");
     out.push_str("  /tree [depth]      Show project directory tree (default depth: 3)\n");
     out.push_str("  /ast <pattern>     Search code symbols (fn, struct, trait, class, etc.)\n");
+    out.push_str("  /coupling          Show file coupling map (use crate:: imports)\n");
     out.push('\n');
 
     // ── AI ──
@@ -523,8 +525,9 @@ pub use crate::commands_git::{
 
 // Project-related handlers
 pub use crate::commands_project::{
-    handle_ast, handle_context, handle_docs, handle_find, handle_fix, handle_health, handle_index,
-    handle_init, handle_lint, handle_run, handle_run_usage, handle_test, handle_tree,
+    handle_ast, handle_context, handle_coupling, handle_docs, handle_find, handle_fix,
+    handle_health, handle_index, handle_init, handle_lint, handle_run, handle_run_usage,
+    handle_test, handle_tree,
 };
 
 // Session-related handlers

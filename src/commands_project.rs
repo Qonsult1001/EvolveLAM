@@ -1261,3 +1261,16 @@ pub fn handle_ast(input: &str) {
     let formatted = ast::format_symbols(&symbols, 30);
     println!("{DIM}{formatted}{RESET}\n");
 }
+
+// ── /coupling ───────────────────────────────────────────────────────────
+
+pub fn handle_coupling() {
+    let src_dir = std::path::Path::new("src");
+    if !src_dir.is_dir() {
+        println!("{DIM}  No src/ directory found.{RESET}\n");
+        return;
+    }
+    let couplings = ast::detect_file_couplings(src_dir);
+    let formatted = ast::format_couplings(&couplings);
+    println!("{DIM}{formatted}{RESET}\n");
+}

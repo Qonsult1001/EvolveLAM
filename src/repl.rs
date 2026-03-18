@@ -529,6 +529,10 @@ pub async fn run_repl(
                 commands::handle_ast(input);
                 continue;
             }
+            "/coupling" => {
+                commands::handle_coupling();
+                continue;
+            }
             "/retry" => {
                 commands::handle_retry(agent, &last_input, &mut session_total, &agent_config.model)
                     .await;
