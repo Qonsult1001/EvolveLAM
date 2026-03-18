@@ -215,6 +215,30 @@ pub enum ConnectionKind {
     Scientific,
 }
 
+impl std::fmt::Display for ConnectionKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConnectionKind::Semantic => write!(f, "semantic"),
+            ConnectionKind::Causal => write!(f, "causal"),
+            ConnectionKind::Temporal => write!(f, "temporal"),
+            ConnectionKind::Mathematical => write!(f, "mathematical"),
+            ConnectionKind::Scientific => write!(f, "scientific"),
+        }
+    }
+}
+
+/// Parse a string into a ConnectionKind, case-insensitive.
+pub fn parse_connection_kind(s: &str) -> Option<ConnectionKind> {
+    match s.to_lowercase().as_str() {
+        "semantic" => Some(ConnectionKind::Semantic),
+        "causal" => Some(ConnectionKind::Causal),
+        "temporal" => Some(ConnectionKind::Temporal),
+        "mathematical" | "math" => Some(ConnectionKind::Mathematical),
+        "scientific" => Some(ConnectionKind::Scientific),
+        _ => None,
+    }
+}
+
 /// A scientific learning entry that can be ingested into the connection graph.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(dead_code)]
@@ -514,6 +538,36 @@ impl ConnectionGraph {
         }
 
         connections_formed
+    }
+
+    /// Find all connections involving a given concept (both directions), with full details.
+    /// Returns (outgoing, incoming) connection lists.
+    pub fn neighbors_detailed(&self, concept: &str) -> (Vec<&Connection>, Vec<&Connection>) {
+        let outgoing: Vec<&Connection> = self
+            .edges
+            .get(concept)
+            .map(|v| v.iter().collect())
+            .unwrap_or_default();
+        let mut incoming: Vec<&Connection> = Vec::new();
+        for edges in self.edges.values() {
+            for conn in edges {
+                if conn.to == concept && conn.from != concept {
+                    incoming.push(conn);
+                }
+            }
+        }
+        (outgoing, incoming)
+    }
+
+    /// Count connections grouped by kind across the whole graph.
+    pub fn connections_by_kind(&self) -> HashMap<String, usize> {
+        let mut counts: HashMap<String, usize> = HashMap::new();
+        for edges in self.edges.values() {
+            for conn in edges {
+                *counts.entry(conn.kind.to_string()).or_insert(0) += 1;
+            }
+        }
+        counts
     }
 
     /// Get the total number of connections in the graph.
@@ -1180,6 +1234,76 @@ mod tests {
         let parsed: Connection = serde_json::from_str(old_json).unwrap();
         assert_eq!(parsed.valid_when, None);
         assert_eq!(parsed.kind, ConnectionKind::Causal);
+    }
+
+    #[test]
+    fn test_connection_kind_display() {
+        assert_eq!(ConnectionKind::Semantic.to_string(), "semantic");
+        assert_eq!(ConnectionKind::Causal.to_string(), "causal");
+        assert_eq!(ConnectionKind::Temporal.to_string(), "temporal");
+        assert_eq!(ConnectionKind::Mathematical.to_string(), "mathematical");
+        assert_eq!(ConnectionKind::Scientific.to_string(), "scientific");
+    }
+
+    #[test]
+    fn test_parse_connection_kind() {
+        assert_eq!(
+            parse_connection_kind("semantic"),
+            Some(ConnectionKind::Semantic)
+        );
+        assert_eq!(
+            parse_connection_kind("Causal"),
+            Some(ConnectionKind::Causal)
+        );
+        assert_eq!(
+            parse_connection_kind("TEMPORAL"),
+            Some(ConnectionKind::Temporal)
+        );
+        assert_eq!(
+            parse_connection_kind("math"),
+            Some(ConnectionKind::Mathematical)
+        );
+        assert_eq!(
+            parse_connection_kind("mathematical"),
+            Some(ConnectionKind::Mathematical)
+        );
+        assert_eq!(
+            parse_connection_kind("scientific"),
+            Some(ConnectionKind::Scientific)
+        );
+        assert_eq!(parse_connection_kind("unknown"), None);
+        assert_eq!(parse_connection_kind(""), None);
+    }
+
+    #[test]
+    fn test_neighbors_detailed() {
+        let mut graph = ConnectionGraph::default();
+        graph.activate_connection("a", "b", ConnectionKind::Semantic);
+        graph.activate_connection("a", "c", ConnectionKind::Causal);
+        graph.activate_connection("d", "a", ConnectionKind::Temporal);
+
+        let (out, inc) = graph.neighbors_detailed("a");
+        assert_eq!(out.len(), 2); // a→b, a→c
+        assert_eq!(inc.len(), 1); // d→a
+        assert_eq!(inc[0].from, "d");
+
+        // Concept with no connections
+        let (out, inc) = graph.neighbors_detailed("missing");
+        assert!(out.is_empty());
+        assert!(inc.is_empty());
+    }
+
+    #[test]
+    fn test_connections_by_kind() {
+        let mut graph = ConnectionGraph::default();
+        graph.activate_connection("a", "b", ConnectionKind::Semantic);
+        graph.activate_connection("a", "c", ConnectionKind::Semantic);
+        graph.activate_connection("a", "d", ConnectionKind::Causal);
+
+        let by_kind = graph.connections_by_kind();
+        assert_eq!(by_kind.get("semantic"), Some(&2));
+        assert_eq!(by_kind.get("causal"), Some(&1));
+        assert_eq!(by_kind.get("temporal"), None);
     }
 
     #[test]

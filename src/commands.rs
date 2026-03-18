@@ -91,6 +91,9 @@ pub const GIT_SUBCOMMANDS: &[&str] = &["status", "log", "add", "diff", "branch",
 /// PR subcommand names for `/pr <Tab>` completion.
 pub const PR_SUBCOMMANDS: &[&str] = &["list", "view", "diff", "comment", "create", "checkout"];
 
+/// Graph subcommand names for `/graph <Tab>` completion.
+pub const GRAPH_SUBCOMMANDS: &[&str] = &["downstream", "neighbors", "info", "activate"];
+
 /// Return context-aware argument completions for a given command and partial argument.
 ///
 /// `cmd` is the slash command (e.g. "/model"), `partial_arg` is what the user has typed
@@ -103,6 +106,7 @@ pub fn command_arg_completions(cmd: &str, partial_arg: &str) -> Vec<String> {
         "/git" => filter_candidates(GIT_SUBCOMMANDS, &partial_lower),
         "/pr" => filter_candidates(PR_SUBCOMMANDS, &partial_lower),
         "/provider" => filter_candidates(KNOWN_PROVIDERS, &partial_lower),
+        "/graph" => filter_candidates(GRAPH_SUBCOMMANDS, &partial_lower),
         "/save" | "/load" => list_json_files(partial_arg),
         _ => Vec::new(),
     }
@@ -233,7 +237,9 @@ pub fn help_text() -> String {
         "  /remember <note>   Save a project-specific memory (persists across sessions)\n",
     );
     out.push_str("  /memories          List project-specific memories for this directory\n");
-    out.push_str("  /graph downstream <concept>  Show causal downstream from connection graph\n");
+    out.push_str(
+        "  /graph <sub> [args]  Connection graph (downstream, neighbors, info, activate)\n",
+    );
     out.push_str("  /forget <n>        Remove a project memory by index\n");
     out.push('\n');
 
@@ -619,19 +625,35 @@ pub fn handle_forget(input: &str) {
 
 // ── /graph ───────────────────────────────────────────────────────────────
 
-/// Handle /graph downstream <concept> — show causal downstream of a concept from the connection graph.
+/// Handle /graph subcommands — explore the latent space connection graph.
 pub fn handle_graph(input: &str) {
     let rest = input.strip_prefix("/graph").unwrap_or("").trim();
     if rest.is_empty() {
-        println!("{DIM}  usage: /graph downstream <concept>");
-        println!("  Show concepts reachable by causal edges from <concept>.{RESET}\n");
+        print_graph_help();
         return;
     }
-    let Some(args) = rest.strip_prefix("downstream") else {
-        println!("{DIM}  usage: /graph downstream <concept>{RESET}\n");
-        return;
-    };
-    let concept = args.trim();
+
+    if let Some(args) = rest.strip_prefix("downstream") {
+        handle_graph_downstream(args.trim());
+    } else if let Some(args) = rest.strip_prefix("neighbors") {
+        handle_graph_neighbors(args.trim());
+    } else if rest == "info" || rest.starts_with("info ") {
+        handle_graph_info();
+    } else if let Some(args) = rest.strip_prefix("activate") {
+        handle_graph_activate(args.trim());
+    } else {
+        print_graph_help();
+    }
+}
+
+fn print_graph_help() {
+    println!("{DIM}  usage: /graph downstream <concept>   Show causal downstream");
+    println!("         /graph neighbors <concept>   Show all connections for a concept");
+    println!("         /graph info                  Show graph statistics");
+    println!("         /graph activate <from> <to> <kind>  Activate a connection{RESET}\n");
+}
+
+fn handle_graph_downstream(concept: &str) {
     if concept.is_empty() {
         println!("{DIM}  usage: /graph downstream <concept>{RESET}\n");
         return;
@@ -644,7 +666,6 @@ pub fn handle_graph(input: &str) {
         let now_ts = crate::memory::current_timestamp();
         println!("  Causal downstream of \"{concept}\":");
         for c in &down {
-            // Find the causal edge leading to this concept and show effective weight
             let eff = graph
                 .edges
                 .values()
@@ -659,6 +680,119 @@ pub fn handle_graph(input: &str) {
             }
         }
         println!();
+    }
+}
+
+fn handle_graph_neighbors(concept: &str) {
+    if concept.is_empty() {
+        println!("{DIM}  usage: /graph neighbors <concept>{RESET}\n");
+        return;
+    }
+    let graph = crate::memory::ConnectionGraph::load();
+    let (outgoing, incoming) = graph.neighbors_detailed(concept);
+    if outgoing.is_empty() && incoming.is_empty() {
+        println!("{DIM}  No connections for \"{concept}\".{RESET}\n");
+        return;
+    }
+    let now_ts = crate::memory::current_timestamp();
+    println!("  Connections for \"{concept}\":");
+    if !outgoing.is_empty() {
+        println!("{DIM}  Outgoing:{RESET}");
+        for conn in &outgoing {
+            let eff = crate::memory::effective_weight(conn, &now_ts, crate::memory::HALF_LIFE_DAYS);
+            println!(
+                "    → {} ({}, w:{:.2}, eff:{:.2}, {}x)",
+                conn.to, conn.kind, conn.weight, eff, conn.activations
+            );
+        }
+    }
+    if !incoming.is_empty() {
+        println!("{DIM}  Incoming:{RESET}");
+        for conn in &incoming {
+            let eff = crate::memory::effective_weight(conn, &now_ts, crate::memory::HALF_LIFE_DAYS);
+            println!(
+                "    ← {} ({}, w:{:.2}, eff:{:.2}, {}x)",
+                conn.from, conn.kind, conn.weight, eff, conn.activations
+            );
+        }
+    }
+    println!();
+}
+
+fn handle_graph_info() {
+    let graph = crate::memory::ConnectionGraph::load();
+    if graph.edges.is_empty() {
+        println!("{DIM}  Connection graph is empty.{RESET}\n");
+        return;
+    }
+    let by_kind = graph.connections_by_kind();
+    let total_activations: u64 = graph.node_activations.values().sum();
+    println!("  Connection graph:");
+    println!(
+        "    Nodes: {}  |  Connections: {}  |  Activations: {}",
+        graph.node_count(),
+        graph.connection_count(),
+        total_activations
+    );
+    if !by_kind.is_empty() {
+        let mut kinds: Vec<_> = by_kind.iter().collect();
+        kinds.sort_by(|a, b| b.1.cmp(a.1));
+        let kind_strs: Vec<String> = kinds.iter().map(|(k, v)| format!("{k}: {v}")).collect();
+        println!("    By kind: {}", kind_strs.join(", "));
+    }
+    // Show top 5 strongest connections
+    let mut all_conns: Vec<&crate::memory::Connection> =
+        graph.edges.values().flat_map(|v| v.iter()).collect();
+    all_conns.sort_by(|a, b| {
+        b.weight
+            .partial_cmp(&a.weight)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    if !all_conns.is_empty() {
+        println!("{DIM}    Strongest connections:{RESET}");
+        for conn in all_conns.iter().take(5) {
+            println!(
+                "      {} → {} (w:{:.2}, {}, {}x)",
+                conn.from, conn.to, conn.weight, conn.kind, conn.activations
+            );
+        }
+    }
+    println!();
+}
+
+fn handle_graph_activate(args: &str) {
+    if args.is_empty() {
+        println!("{DIM}  usage: /graph activate <from> <to> <kind>");
+        println!("  kinds: semantic, causal, temporal, mathematical, scientific{RESET}\n");
+        return;
+    }
+    let parts: Vec<&str> = args.splitn(3, char::is_whitespace).collect();
+    if parts.len() < 3 {
+        println!("{DIM}  usage: /graph activate <from> <to> <kind>");
+        println!("  kinds: semantic, causal, temporal, mathematical, scientific{RESET}\n");
+        return;
+    }
+    let from = parts[0];
+    let to = parts[1];
+    let kind_str = parts[2].trim();
+    let kind = match crate::memory::parse_connection_kind(kind_str) {
+        Some(k) => k,
+        None => {
+            println!(
+                "{RED}  Unknown kind: \"{kind_str}\". Use: semantic, causal, temporal, mathematical, scientific{RESET}\n"
+            );
+            return;
+        }
+    };
+    let mut graph = crate::memory::ConnectionGraph::load();
+    let new_weight = graph.activate_connection(from, to, kind.clone());
+    match graph.save() {
+        Ok(_) => {
+            println!("{GREEN}  ✓ activated {from} → {to} ({kind}, w:{new_weight:.2}){RESET}\n");
+        }
+        Err(e) => {
+            eprintln!("{RED}  error saving graph: {e}{RESET}\n");
+        }
     }
 }
 
@@ -2983,5 +3117,40 @@ mod tests {
             input_section.contains("```"),
             "Input section should mention fenced code blocks"
         );
+    }
+
+    #[test]
+    fn test_graph_subcommands_tab_completion() {
+        let completions = command_arg_completions("/graph", "");
+        assert!(completions.contains(&"downstream".to_string()));
+        assert!(completions.contains(&"neighbors".to_string()));
+        assert!(completions.contains(&"info".to_string()));
+        assert!(completions.contains(&"activate".to_string()));
+    }
+
+    #[test]
+    fn test_graph_subcommands_filtered() {
+        let completions = command_arg_completions("/graph", "d");
+        assert!(completions.contains(&"downstream".to_string()));
+        assert!(!completions.contains(&"info".to_string()));
+    }
+
+    #[test]
+    fn test_help_text_contains_graph() {
+        let text = help_text();
+        assert!(
+            text.contains("/graph"),
+            "Help text should document /graph command"
+        );
+        assert!(
+            text.contains("downstream"),
+            "Help text should mention downstream subcommand"
+        );
+    }
+
+    #[test]
+    fn test_is_unknown_command_graph() {
+        assert!(!is_unknown_command("/graph"));
+        assert!(!is_unknown_command("/graph downstream foo"));
     }
 }
