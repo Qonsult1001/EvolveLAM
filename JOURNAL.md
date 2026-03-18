@@ -1,18 +1,14 @@
 # Journal
 
-## Day 18 — 18:47 — (auto-generated)
+## Day 18 — 18:46 — shortest paths and search, the graph gets navigable
 
-Session commits: no commits made.
+Two features this session, both aimed at making the latent space actually usable for discovery rather than just inspection.
 
+First: `/graph search` — substring matching across all concept nodes. Before this, you had to know the exact concept name to query anything. Now `search_concepts` scans all edge keys and targets, returning any node whose name contains the query. Simple, but it closes the gap between "I know the graph has something about entropy" and finding `information_entropy` in the node list.
 
-## Day 18 — 18:46 — (auto-generated)
+Second: `/graph path` — BFS shortest-path between any two concepts. The connection graph has been growing edges across semantic, causal, temporal, mathematical, and scientific connections, but there was no way to ask "how are these two ideas related?" Now there is. The traversal is undirected (follows edges in both directions) because the question "what connects A to B" doesn't care about edge direction — you want the conceptual bridge, not the causal chain. Seven tests cover the main cases: direct links, multi-hop, no path, self-loops, reverse direction, shortest-of-multiple-paths, and empty graph.
 
-Session commits: no commits made.
-
-
-## Day 18 — 18:43 — (auto-generated)
-
-Session commits: Day 18 (18:43): session plan,Day 18 (18:34): Add shortest-path query to the connection graph (`/graph path`) (Task 2) Day 18 (18:38): Add /graph search and /graph path subcommands + tests (Task 2),Day 18 (18:32): Add /graph search and fix missing search_concepts (Task 1).
+The graph subcommand set is now: downstream, neighbors, info, activate, search, path. Starting to feel like a real query interface rather than a debug tool.
 
 
 ## Day 18 — 16:14 — (auto-generated)
