@@ -844,60 +844,94 @@ case "${1:-help}" in
         # that the IDE agent follows autonomously end-to-end.
         phase_setup
 
-        # Build the runbook: plan prompt + full loop instructions
-        PLAN_CONTENT=$(cat "$EVOLVE_DIR/plan_prompt.md")
+        # Build the runbook: full pipeline instructions + plan prompt inline
         cat > "$EVOLVE_DIR/runbook.md" <<'RUNBOOK_HEADER'
 # Autonomous Evolution Runbook
 
-Follow these steps IN ORDER. Do not skip any step. Do not stop until step 5.
+This runbook drives a full evolution cycle — the same pipeline as evolve.sh
+but with you (the IDE agent) as the LLM instead of the yoyo binary.
+
+Follow these steps IN ORDER. Do not skip any step. Do not stop until Step 7.
 
 ---
 
-## Step 1: Create the Session Plan
+## What already happened (setup phase)
 
-Read the planning prompt below and act on it. Your deliverable is SESSION_PLAN.md.
+The setup phase just ran and completed these steps:
+- ✅ Verified build passes (cargo build + cargo test)
+- ✅ Checked previous CI status for failures
+- ✅ Fetched GitHub issues (community `agent-input`, self `agent-self`, `agent-help-wanted`)
+- ✅ Scanned for pending replies on previously touched issues
+- ✅ Loaded identity context (IDENTITY.md, PERSONALITY.md, learnings)
+- ✅ Wrote the planning prompt (included below)
+
+Issues are in ISSUES_TODAY.md. Everything is ready for you to plan.
+
+---
+
+## Step 1: Read your own source code
+
+Before planning, read and understand your current state:
+- Read ALL files under `src/` (your source code)
+- Read `JOURNAL.md` (last 5 entries — what you did recently)
+- Read `ISSUES_TODAY.md` (community issues fetched during setup)
+- Read `memory/active_learnings.md` if it exists (your accumulated wisdom)
+
+This is your self-assessment phase. Note friction, bugs, gaps, and opportunities.
+
+---
+
+## Step 2: Create the Session Plan
+
+Now act on the planning prompt below. Your deliverable is SESSION_PLAN.md.
 
 RUNBOOK_HEADER
 
         # Inline the plan prompt content
         cat "$EVOLVE_DIR/plan_prompt.md" >> "$EVOLVE_DIR/runbook.md"
 
-        cat >> "$EVOLVE_DIR/runbook.md" <<'RUNBOOK_LOOP'
+        cat >> "$EVOLVE_DIR/runbook.md" <<'RUNBOOK_REST'
 
 ---
 
-## Step 2: Task Loop
+## Step 3: Task Loop — Make changes, run tests, commit or revert
 
-After creating and committing SESSION_PLAN.md, run this loop:
+After creating and committing SESSION_PLAN.md, implement each task:
 
 ```
 REPEAT:
   a. Run: ./scripts/evolve-ide.sh next-task
-  b. If output says "No more tasks" or "done" → go to Step 3
+  b. If output says "No more tasks" or "done" → go to Step 4
   c. Read .evolve/task_prompt.md and implement the task described in it
   d. Run: ./scripts/evolve-ide.sh verify-task
-  e. Read the output — if it says REVERTED, note the failure and continue
-  f. Go back to (a)
+     → If VERIFIED OK: task is done, move on
+     → If REVERTED: task failed verification, it was auto-reverted. Move on.
+  e. Go back to (a)
 ```
 
 For each task:
 - Read the task prompt carefully — it tells you exactly what to implement
-- Follow the evolve skill rules (test first, surgical edits, cargo fmt/clippy/build/test)
+- Write a test first if possible
+- Use edit_file for surgical changes (don't rewrite entire files)
+- Run: cargo fmt && cargo clippy --all-targets -- -D warnings && cargo build && cargo test
+- Fix errors. If stuck after 3 tries, revert: git checkout -- .
 - Commit after each task passes all checks
-- Do NOT skip verify-task — it checks for protected files, build, and tests
+- Do NOT skip verify-task — it checks for protected files, build, and tests.
+  If verification fails, the task is auto-reverted and an issue is filed.
 
 ---
 
-## Step 3: Finish
+## Step 4: Finish — Issue responses, journal, tag, push
 
 Run: ./scripts/evolve-ide.sh finish
 
-This will:
-- Extract and post issue responses from SESSION_PLAN.md
-- Verify the final build (auto-fixes formatting)
-- Write a fallback journal entry if you haven't written one
-- Tag the known-good state
-- Push to the designated branch
+This does everything evolve.sh does at the end:
+- **Extracts issue responses** from SESSION_PLAN.md's "### Issue Responses" section
+- **Posts replies to GitHub issues** as 🐙 yoyo-evolve (commenting, closing fixed/wontfix)
+- **Verifies the final build** (auto-fixes formatting with cargo fmt)
+- **Writes a fallback journal entry** if you haven't written one
+- **Tags** the known-good state (e.g., day42-14-30)
+- **Pushes** to the designated branch
 
 If finish reports build errors and writes .evolve/fix_prompt.md:
 - Read .evolve/fix_prompt.md and fix the errors
@@ -905,24 +939,38 @@ If finish reports build errors and writes .evolve/fix_prompt.md:
 
 ---
 
-## Step 4: Journal & Reflection
+## Step 5: Journal Entry
 
-If .evolve/journal_prompt.md exists after finish, read it and write the journal entry.
-If .evolve/reflect_prompt.md exists, read it and reflect (only if genuinely novel insight).
+If .evolve/journal_prompt.md exists after finish, read it and write a journal entry.
+Match the voice in existing JOURNAL.md entries. Prepend the new entry at the top.
+Commit: git add JOURNAL.md && git commit -m "Day N (HH:MM): journal entry"
 
 ---
 
-## Step 5: Done
+## Step 6: Reflection & Learnings
 
-The evolution session is complete. Report what was accomplished.
-RUNBOOK_LOOP
+If .evolve/reflect_prompt.md exists, read it. If you had a genuinely novel insight
+(not just code patterns — something about yourself, your process, or your growth),
+append one JSONL line to memory/learnings.jsonl via python3 json.dumps().
+If nothing novel, skip this step.
+
+---
+
+## Step 7: Done
+
+The evolution session is complete. Report:
+- How many tasks were completed vs reverted
+- Which issues were addressed and how (implemented/wontfix/partial/reply)
+- Any insights or learnings from this session
+RUNBOOK_REST
 
         echo ""
         echo "========================================="
         echo "→ Runbook written to $EVOLVE_DIR/runbook.md"
         echo ""
         echo "READ $EVOLVE_DIR/runbook.md AND FOLLOW IT END-TO-END."
-        echo "It contains the planning prompt and full loop instructions."
+        echo "It contains the full pipeline: read source → plan → implement →"
+        echo "verify → reply to issues → journal → push."
         echo "========================================="
         ;;
     help|--help|-h)
