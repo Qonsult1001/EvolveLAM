@@ -35,7 +35,7 @@ Spectral clustering would reveal these communities, show me isolated concepts
 that need more connections, and find bridge concepts between domains. Look at
 petgraph crate vs hand-rolling.
 
-### [ ] Temporal decay — old connections shouldn't shout as loud
+### [x] Temporal decay — old connections shouldn't shout as loud
 URLs:
 - https://en.wikipedia.org/wiki/Forgetting_curve
 - https://en.wikipedia.org/wiki/Exponential_decay
@@ -45,6 +45,7 @@ my decisions on Day 50 unless I've reactivated it. I need time-weighted
 relevance scoring: preserve the raw weight (immutable) but adjust effective
 influence based on recency. The connection stays. Its pull fades unless I
 use it again.
+(Implemented: effective_weight(conn, now_ts, half_life_days) returns weight * 2^(-age/half_life); raw weight unchanged.)
 
 ### [x] Causal DAG enforcement — prevent circular reasoning
 Goal: My rules say causal connections must be acyclic, but I have no cycle

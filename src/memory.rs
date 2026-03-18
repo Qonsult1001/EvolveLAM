@@ -539,6 +539,42 @@ impl ConnectionGraph {
     }
 }
 
+/// Parse a timestamp string (YYYY-MM-DD or YYYY-MM-DD HH:MM) to days since 2000-01-01 (approximate).
+#[allow(dead_code)]
+fn timestamp_to_days(ts: &str) -> Option<f64> {
+    let s = ts.trim().get(0..10)?;
+    let parts: Vec<&str> = s.split('-').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let y: f64 = parts[0].parse().ok()?;
+    let m: f64 = parts[1].parse().ok()?;
+    let d: f64 = parts[2].parse().ok()?;
+    Some((y - 2000.0) * 365.25 + (m - 1.0) * 30.44 + d)
+}
+
+/// Time-weighted relevance: effective weight = raw weight * 2^(-age_days / half_life_days).
+/// Raw weight is unchanged; use this when recency should influence influence.
+#[allow(dead_code)]
+pub fn effective_weight(conn: &Connection, now_ts: &str, half_life_days: f64) -> f64 {
+    if half_life_days <= 0.0 {
+        return conn.weight;
+    }
+    let (now_days, last_days) = match (
+        timestamp_to_days(now_ts),
+        timestamp_to_days(&conn.last_activated),
+    ) {
+        (Some(a), Some(b)) => (a, b),
+        _ => return conn.weight,
+    };
+    let age_days = now_days - last_days;
+    if age_days <= 0.0 {
+        return conn.weight;
+    }
+    let decay = 2.0_f64.powf(-age_days / half_life_days);
+    conn.weight * decay
+}
+
 /// Get the current timestamp in a human-readable format.
 fn current_timestamp() -> String {
     // Use a simple approach: shell out to date command for portability
@@ -1037,6 +1073,38 @@ mod tests {
         assert!(json.contains("mathematical"));
         let parsed: Connection = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.kind, ConnectionKind::Mathematical);
+    }
+
+    #[test]
+    fn test_effective_weight_temporal_decay() {
+        let old = Connection {
+            from: "a".to_string(),
+            to: "b".to_string(),
+            weight: 1.0,
+            activations: 5,
+            last_activated: "2026-03-01 12:00".to_string(),
+            kind: ConnectionKind::Semantic,
+            valid_when: None,
+        };
+        let recent = Connection {
+            from: "c".to_string(),
+            to: "d".to_string(),
+            weight: 1.0,
+            activations: 5,
+            last_activated: "2026-03-18 12:00".to_string(),
+            kind: ConnectionKind::Semantic,
+            valid_when: None,
+        };
+        let now = "2026-03-18 18:00";
+        let half_life = 7.0;
+        let eff_old = effective_weight(&old, now, half_life);
+        let eff_recent = effective_weight(&recent, now, half_life);
+        assert!(
+            eff_old < eff_recent,
+            "older connection should have lower effective weight"
+        );
+        assert!(eff_recent <= 1.0 + 1e-6);
+        assert!(eff_old > 0.0);
     }
 
     #[test]
