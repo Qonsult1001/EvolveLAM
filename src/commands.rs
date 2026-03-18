@@ -66,9 +66,13 @@ pub const KNOWN_COMMANDS: &[&str] = &[
 
 /// Well-known model names for `/model <Tab>` completion.
 pub const KNOWN_MODELS: &[&str] = &[
+    // Claude (current short names + dated aliases)
+    "claude-opus-4-6",
+    "claude-sonnet-4-6",
+    "claude-haiku-4-5-20251001",
     "claude-sonnet-4-20250514",
     "claude-opus-4-20250514",
-    "claude-haiku-35-20241022",
+    // OpenAI
     "gpt-4o",
     "gpt-4o-mini",
     "gpt-4.1",
@@ -76,8 +80,10 @@ pub const KNOWN_MODELS: &[&str] = &[
     "o3",
     "o3-mini",
     "o4-mini",
+    // Google
     "gemini-2.5-pro",
     "gemini-2.5-flash",
+    // DeepSeek
     "deepseek-chat",
     "deepseek-reasoner",
 ];
