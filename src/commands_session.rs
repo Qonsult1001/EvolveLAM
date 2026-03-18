@@ -209,6 +209,39 @@ pub fn handle_search(agent: &Agent, input: &str) {
 /// Storage for conversation bookmarks: named snapshots of the message list.
 pub type Bookmarks = HashMap<String, String>;
 
+/// Path to the bookmarks persistence file.
+const BOOKMARKS_FILE: &str = ".yoyo/bookmarks.json";
+
+/// Load bookmarks from `.yoyo/bookmarks.json`.
+/// Returns empty if file doesn't exist or can't be parsed.
+pub fn load_bookmarks() -> Bookmarks {
+    load_bookmarks_from(std::path::Path::new(BOOKMARKS_FILE))
+}
+
+/// Load bookmarks from a specific path (for testing).
+pub fn load_bookmarks_from(path: &std::path::Path) -> Bookmarks {
+    match std::fs::read_to_string(path) {
+        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+        Err(_) => Bookmarks::new(),
+    }
+}
+
+/// Save bookmarks to `.yoyo/bookmarks.json`.
+/// Creates the `.yoyo/` directory if needed.
+pub fn save_bookmarks(bookmarks: &Bookmarks) -> Result<(), String> {
+    save_bookmarks_to(bookmarks, std::path::Path::new(BOOKMARKS_FILE))
+}
+
+/// Save bookmarks to a specific path (for testing).
+pub fn save_bookmarks_to(bookmarks: &Bookmarks, path: &std::path::Path) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {e}"))?;
+    }
+    let json =
+        serde_json::to_string_pretty(bookmarks).map_err(|e| format!("Serialization error: {e}"))?;
+    std::fs::write(path, json).map_err(|e| format!("Failed to write bookmarks: {e}"))
+}
+
 /// Parse the bookmark name from `/mark <name>` input.
 /// Returns None if no name is provided.
 pub fn parse_bookmark_name(input: &str, prefix: &str) -> Option<String> {
@@ -241,6 +274,10 @@ pub fn handle_mark(agent: &Agent, input: &str, bookmarks: &mut Bookmarks) {
                 println!("{GREEN}  ✓ bookmark '{name}' updated ({msg_count} messages){RESET}\n");
             } else {
                 println!("{GREEN}  ✓ bookmark '{name}' saved ({msg_count} messages){RESET}\n");
+            }
+            // Auto-persist to disk
+            if let Err(e) = save_bookmarks(bookmarks) {
+                eprintln!("{DIM}  (bookmark save warning: {e}){RESET}");
             }
         }
         Err(e) => eprintln!("{RED}  error saving bookmark: {e}{RESET}\n"),

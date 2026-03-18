@@ -266,7 +266,13 @@ pub async fn run_repl(
 
     let mut session_total = Usage::default();
     let mut last_input: Option<String> = None;
-    let mut bookmarks = commands::Bookmarks::new();
+    let mut bookmarks = commands::load_bookmarks();
+    if !bookmarks.is_empty() {
+        println!(
+            "{DIM}  Loaded {} bookmark(s) from previous session.{RESET}",
+            bookmarks.len()
+        );
+    }
 
     loop {
         let prompt = if let Some(branch) = git_branch() {

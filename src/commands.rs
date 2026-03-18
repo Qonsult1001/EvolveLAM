@@ -541,7 +541,7 @@ pub use crate::commands_project::{
 pub use crate::commands_session::{
     auto_compact_if_needed, auto_save_on_exit, handle_compact, handle_history, handle_jump,
     handle_load, handle_mark, handle_marks, handle_save, handle_search, handle_spawn,
-    last_session_exists, Bookmarks,
+    last_session_exists, load_bookmarks,
 };
 
 // Memory-related handlers
@@ -898,7 +898,7 @@ mod tests {
         run_shell_command, scan_important_dirs, scan_important_files, test_command_for_project,
         IndexEntry, ProjectType, RustErrorCategory,
     };
-    use crate::commands_session::{parse_bookmark_name, parse_spawn_task};
+    use crate::commands_session::{parse_bookmark_name, parse_spawn_task, Bookmarks};
     use crate::memory::{
         format_memories_for_prompt, load_memories_from, MemoryEntry, ProjectMemory,
     };
@@ -2751,6 +2751,46 @@ mod tests {
         assert!(jump_matches("/jump checkpoint"));
         assert!(!jump_matches("/jumper"));
         assert!(!jump_matches("/jumping"));
+    }
+
+    #[test]
+    fn test_save_and_load_bookmarks_roundtrip() {
+        use crate::commands_session::{load_bookmarks_from, save_bookmarks_to};
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bookmarks.json");
+
+        let mut bookmarks = Bookmarks::new();
+        bookmarks.insert("start".to_string(), r#"[{"role":"user"}]"#.to_string());
+        bookmarks.insert("mid".to_string(), r#"[{"role":"assistant"}]"#.to_string());
+
+        save_bookmarks_to(&bookmarks, &path).unwrap();
+        let loaded = load_bookmarks_from(&path);
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded.get("start").unwrap(), r#"[{"role":"user"}]"#);
+        assert_eq!(loaded.get("mid").unwrap(), r#"[{"role":"assistant"}]"#);
+    }
+
+    #[test]
+    fn test_load_bookmarks_missing_file() {
+        use crate::commands_session::load_bookmarks_from;
+
+        let path = std::path::Path::new("/tmp/nonexistent_yoyo_bookmarks.json");
+        let loaded = load_bookmarks_from(path);
+        assert!(loaded.is_empty());
+    }
+
+    #[test]
+    fn test_save_bookmarks_empty() {
+        use crate::commands_session::save_bookmarks_to;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bookmarks.json");
+
+        let bookmarks = Bookmarks::new();
+        save_bookmarks_to(&bookmarks, &path).unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("{}") || content.contains("{\n}"));
     }
 
     // ── command_arg_completions tests ─────────────────────────────────────
