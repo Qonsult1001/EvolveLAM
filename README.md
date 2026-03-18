@@ -323,6 +323,8 @@ For manual step-by-step control, use individual subcommands:
 ./scripts/evolve-ide.sh finish       # Journal, issues, tag, push
 ```
 
+After `finish`, the commits and day tag (e.g. `day18-16-36`) are pushed to your current branch — check that branch and the new tag on GitHub to see the results.
+
 Environment variables:
 
 | Variable | Default | Description |
