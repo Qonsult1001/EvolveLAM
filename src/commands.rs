@@ -99,7 +99,14 @@ pub const GIT_SUBCOMMANDS: &[&str] = &["status", "log", "add", "diff", "branch",
 pub const PR_SUBCOMMANDS: &[&str] = &["list", "view", "diff", "comment", "create", "checkout"];
 
 /// Graph subcommand names for `/graph <Tab>` completion.
-pub const GRAPH_SUBCOMMANDS: &[&str] = &["downstream", "neighbors", "info", "activate", "search"];
+pub const GRAPH_SUBCOMMANDS: &[&str] = &[
+    "downstream",
+    "neighbors",
+    "info",
+    "activate",
+    "search",
+    "path",
+];
 
 /// Return context-aware argument completions for a given command and partial argument.
 ///
@@ -652,6 +659,8 @@ pub fn handle_graph(input: &str) {
         handle_graph_activate(args.trim());
     } else if let Some(args) = rest.strip_prefix("search") {
         handle_graph_search(args.trim());
+    } else if let Some(args) = rest.strip_prefix("path") {
+        handle_graph_path(args.trim());
     } else {
         print_graph_help();
     }
@@ -662,7 +671,8 @@ fn print_graph_help() {
     println!("         /graph neighbors <concept>   Show all connections for a concept");
     println!("         /graph info                  Show graph statistics");
     println!("         /graph activate <from> <to> <kind>  Activate a connection");
-    println!("         /graph search <query>        Search concepts by substring{RESET}\n");
+    println!("         /graph search <query>        Search concepts by substring");
+    println!("         /graph path <from> <to>      Shortest path between concepts{RESET}\n");
 }
 
 fn handle_graph_downstream(concept: &str) {
@@ -804,6 +814,52 @@ fn handle_graph_activate(args: &str) {
         }
         Err(e) => {
             eprintln!("{RED}  error saving graph: {e}{RESET}\n");
+        }
+    }
+}
+
+fn handle_graph_path(args: &str) {
+    let parts: Vec<&str> = args.splitn(2, ' ').collect();
+    if parts.len() < 2 || parts[0].is_empty() || parts[1].is_empty() {
+        println!("{DIM}  usage: /graph path <from> <to>{RESET}\n");
+        return;
+    }
+    let from = parts[0].trim();
+    let to = parts[1].trim();
+    let graph = crate::memory::ConnectionGraph::load();
+    match graph.shortest_path(from, to) {
+        Some(path) => {
+            println!(
+                "  Path from \"{from}\" to \"{to}\" ({} hops):",
+                path.len() - 1
+            );
+            for (i, node) in path.iter().enumerate() {
+                if i == 0 {
+                    println!("    {node}");
+                } else {
+                    // Find the edge between path[i-1] and path[i] to show the kind
+                    let prev = &path[i - 1];
+                    let edge_kind = graph
+                        .edges
+                        .get(prev.as_str())
+                        .and_then(|edges| edges.iter().find(|e| e.to == *node))
+                        .map(|e| format!("{}", e.kind))
+                        .or_else(|| {
+                            // Check reverse direction
+                            graph
+                                .edges
+                                .get(node.as_str())
+                                .and_then(|edges| edges.iter().find(|e| e.to == *prev))
+                                .map(|e| format!("{} (rev)", e.kind))
+                        })
+                        .unwrap_or_else(|| "?".to_string());
+                    println!("    → {node}  [{edge_kind}]");
+                }
+            }
+            println!();
+        }
+        None => {
+            println!("{DIM}  No path found between \"{from}\" and \"{to}\".{RESET}\n");
         }
     }
 }
@@ -3172,6 +3228,7 @@ mod tests {
         assert!(completions.contains(&"neighbors".to_string()));
         assert!(completions.contains(&"info".to_string()));
         assert!(completions.contains(&"activate".to_string()));
+        assert!(completions.contains(&"path".to_string()));
     }
 
     #[test]
@@ -3198,5 +3255,25 @@ mod tests {
     fn test_is_unknown_command_graph() {
         assert!(!is_unknown_command("/graph"));
         assert!(!is_unknown_command("/graph downstream foo"));
+    }
+
+    #[test]
+    fn test_is_unknown_command_coupling() {
+        assert!(!is_unknown_command("/coupling"));
+    }
+
+    #[test]
+    fn test_graph_path_tab_completion() {
+        let completions = command_arg_completions("/graph", "p");
+        assert!(completions.contains(&"path".to_string()));
+    }
+
+    #[test]
+    fn test_help_text_contains_coupling() {
+        let text = help_text();
+        assert!(
+            text.contains("/coupling"),
+            "Help text should document /coupling command"
+        );
     }
 }
