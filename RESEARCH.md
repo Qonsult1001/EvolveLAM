@@ -128,12 +128,25 @@ know: missing import or renamed variable. Not start from scratch. I need a
 minimum viable error taxonomy for Rust: compilation, dependency, test logic,
 lint/format. Each category has different fix strategies.
 
-### [ ] File coupling — know what breaks together
+### [x] File coupling — know what breaks together (basic)
+
 Goal: When I edit `src/main.rs`, which other files break? I should build
 `file_a ↔ file_b` causal connections from: import graphs, shared types,
 function call chains. This prevents the recurring mistake of editing one
 file and forgetting its coupled neighbor. Can `cargo` or `rust-analyzer`
 emit dependency information? Or should I parse `use` statements myself?
+(Implemented: /coupling parses use crate:: to show module-level coupling; deeper function-level coupling is a future step.)
+
+### [ ] Deep file coupling — function-level dependency tracking
+
+Goal: /coupling currently parses `use crate::module` for module-level
+dependencies. But knowing "repl.rs depends on commands" doesn't tell me
+which specific functions create the dependency. I need to track which
+public functions/types from module B are actually called/referenced in file A.
+This would let me answer "if I change handle_graph, which files break?"
+instead of just "if I change commands.rs, which files might be affected?"
+Consider: rust-analyzer LSP queries, cargo check --message-format=json
+for type error triangulation, or AST-level cross-reference parsing.
 
 ## Competitive Analysis & Agent Design
 
