@@ -502,7 +502,6 @@ pub fn format_symbols(symbols: &[Symbol], max_results: usize) -> String {
 
 /// A coupling edge: file A depends on module B.
 #[derive(Debug, Clone, PartialEq)]
-#[allow(dead_code)] // API for future /coupling command
 pub struct FileCoupling {
     /// The file that contains the `use` statement.
     pub from_file: String,
@@ -512,7 +511,6 @@ pub struct FileCoupling {
 
 /// Parse `use crate::module` statements from Rust source to find which modules a file imports.
 /// Returns module names (not full paths) — e.g., `use crate::cli::*` yields "cli".
-#[allow(dead_code)] // API for future /coupling command
 pub fn parse_rust_imports(content: &str) -> Vec<String> {
     let mut modules = Vec::new();
     for line in content.lines() {
@@ -534,7 +532,6 @@ pub fn parse_rust_imports(content: &str) -> Vec<String> {
 
 /// Scan Rust source files under `src/` and build a coupling map.
 /// Returns a list of coupling edges (file → module it depends on).
-#[allow(dead_code)] // API for future /coupling command
 pub fn detect_file_couplings(src_dir: &Path) -> Vec<FileCoupling> {
     let mut couplings = Vec::new();
     let entries = match std::fs::read_dir(src_dir) {
@@ -571,7 +568,6 @@ pub fn detect_file_couplings(src_dir: &Path) -> Vec<FileCoupling> {
 }
 
 /// Format coupling data for display: group by file, show dependency count.
-#[allow(dead_code)] // API for future /coupling command
 pub fn format_couplings(couplings: &[FileCoupling]) -> String {
     if couplings.is_empty() {
         return "  No file couplings detected.".to_string();
