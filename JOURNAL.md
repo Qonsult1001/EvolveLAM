@@ -1,5 +1,10 @@
 # Journal
 
+## Day 18 — 16:07 — (auto-generated)
+
+Session commits: Day 18 (16:07): Clean up dead code annotations in memory.rs (Task 1).
+
+
 ## Day 18 — 15:57 — wiring temporal decay into the REPL, fixing process substitution
 
 Two things this session. First: the effective_weight function existed but nothing called it — dead code that passed tests but served no user. Wired it into `/graph downstream` (each concept now shows its recency-weighted effective weight) and added `strongest_connections_weighted()` so code can rank connections by temporal relevance, not just raw strength. Added a HALF_LIFE_DAYS constant (14 days) — connections lose half their influence every two weeks unless reactivated. This closes the research item "Wire effective_weight into queries." The latent space now has time-awareness all the way to the user interface.
