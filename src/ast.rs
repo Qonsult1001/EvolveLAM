@@ -496,6 +496,111 @@ pub fn format_symbols(symbols: &[Symbol], max_results: usize) -> String {
     lines.join("\n")
 }
 
+// ============================================================================
+// File Coupling Detection
+// ============================================================================
+
+/// A coupling edge: file A depends on module B.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FileCoupling {
+    /// The file that contains the `use` statement.
+    pub from_file: String,
+    /// The module being imported (e.g., "cli", "format", "memory").
+    pub to_module: String,
+}
+
+/// Parse `use crate::module` statements from Rust source to find which modules a file imports.
+/// Returns module names (not full paths) — e.g., `use crate::cli::*` yields "cli".
+pub fn parse_rust_imports(content: &str) -> Vec<String> {
+    let mut modules = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        // Match: use crate::module_name (with optional ::sub or ;)
+        if let Some(rest) = trimmed.strip_prefix("use crate::") {
+            // Extract the first path segment (the module name)
+            let module: String = rest
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            if !module.is_empty() && !modules.contains(&module) {
+                modules.push(module);
+            }
+        }
+    }
+    modules
+}
+
+/// Scan Rust source files under `src/` and build a coupling map.
+/// Returns a list of coupling edges (file → module it depends on).
+pub fn detect_file_couplings(src_dir: &Path) -> Vec<FileCoupling> {
+    let mut couplings = Vec::new();
+    let entries = match std::fs::read_dir(src_dir) {
+        Ok(e) => e,
+        Err(_) => return couplings,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+            continue;
+        }
+        let filename = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        for module in parse_rust_imports(&content) {
+            couplings.push(FileCoupling {
+                from_file: filename.clone(),
+                to_module: module,
+            });
+        }
+    }
+    couplings.sort_by(|a, b| {
+        a.from_file
+            .cmp(&b.from_file)
+            .then(a.to_module.cmp(&b.to_module))
+    });
+    couplings
+}
+
+/// Format coupling data for display: group by file, show dependency count.
+pub fn format_couplings(couplings: &[FileCoupling]) -> String {
+    if couplings.is_empty() {
+        return "  No file couplings detected.".to_string();
+    }
+
+    // Group by from_file
+    let mut by_file: std::collections::BTreeMap<&str, Vec<&str>> =
+        std::collections::BTreeMap::new();
+    for c in couplings {
+        by_file.entry(&c.from_file).or_default().push(&c.to_module);
+    }
+
+    // Also count how many files depend on each module (reverse coupling)
+    let mut dependents: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for c in couplings {
+        *dependents.entry(&c.to_module).or_insert(0) += 1;
+    }
+
+    let mut lines = Vec::new();
+    lines.push("  File couplings (use crate:: imports):\n".to_string());
+    for (file, modules) in &by_file {
+        lines.push(format!("  {file} → [{}]", modules.join(", ")));
+    }
+    lines.push(String::new());
+    lines.push("  Most depended-on modules:".to_string());
+    let mut dep_list: Vec<(&&str, &usize)> = dependents.iter().collect();
+    dep_list.sort_by(|a, b| b.1.cmp(a.1));
+    for (module, count) in dep_list.iter().take(10) {
+        lines.push(format!("    {module}: {count} dependents"));
+    }
+    lines.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
