@@ -502,6 +502,7 @@ pub fn format_symbols(symbols: &[Symbol], max_results: usize) -> String {
 
 /// A coupling edge: file A depends on module B.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)] // API for future /coupling command
 pub struct FileCoupling {
     /// The file that contains the `use` statement.
     pub from_file: String,
@@ -511,6 +512,7 @@ pub struct FileCoupling {
 
 /// Parse `use crate::module` statements from Rust source to find which modules a file imports.
 /// Returns module names (not full paths) — e.g., `use crate::cli::*` yields "cli".
+#[allow(dead_code)] // API for future /coupling command
 pub fn parse_rust_imports(content: &str) -> Vec<String> {
     let mut modules = Vec::new();
     for line in content.lines() {
@@ -532,6 +534,7 @@ pub fn parse_rust_imports(content: &str) -> Vec<String> {
 
 /// Scan Rust source files under `src/` and build a coupling map.
 /// Returns a list of coupling edges (file → module it depends on).
+#[allow(dead_code)] // API for future /coupling command
 pub fn detect_file_couplings(src_dir: &Path) -> Vec<FileCoupling> {
     let mut couplings = Vec::new();
     let entries = match std::fs::read_dir(src_dir) {
@@ -568,6 +571,7 @@ pub fn detect_file_couplings(src_dir: &Path) -> Vec<FileCoupling> {
 }
 
 /// Format coupling data for display: group by file, show dependency count.
+#[allow(dead_code)] // API for future /coupling command
 pub fn format_couplings(couplings: &[FileCoupling]) -> String {
     if couplings.is_empty() {
         return "  No file couplings detected.".to_string();
@@ -849,5 +853,71 @@ type Handler interface {
 
         let result = match_function("export const greet = async () => {");
         assert_eq!(result, Some("greet".to_string()));
+    }
+
+    // ── File coupling tests ──────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_rust_imports_basic() {
+        let code = r#"
+use crate::cli::*;
+use crate::format::*;
+use crate::prompt::*;
+use std::io;
+"#;
+        let imports = parse_rust_imports(code);
+        assert_eq!(imports, vec!["cli", "format", "prompt"]);
+    }
+
+    #[test]
+    fn test_parse_rust_imports_nested() {
+        let code = "use crate::memory::ConnectionGraph;\nuse crate::memory::ConnectionKind;\n";
+        let imports = parse_rust_imports(code);
+        // Deduplicates: memory appears only once
+        assert_eq!(imports, vec!["memory"]);
+    }
+
+    #[test]
+    fn test_parse_rust_imports_empty() {
+        let code = "use std::collections::HashMap;\nfn main() {}\n";
+        let imports = parse_rust_imports(code);
+        assert!(imports.is_empty());
+    }
+
+    #[test]
+    fn test_parse_rust_imports_braced() {
+        let code = "use crate::cli::{is_verbose, AUTO_COMPACT_THRESHOLD};\n";
+        let imports = parse_rust_imports(code);
+        assert_eq!(imports, vec!["cli"]);
+    }
+
+    #[test]
+    fn test_format_couplings_empty() {
+        let result = format_couplings(&[]);
+        assert!(result.contains("No file couplings"));
+    }
+
+    #[test]
+    fn test_format_couplings_basic() {
+        let couplings = vec![
+            FileCoupling {
+                from_file: "main.rs".to_string(),
+                to_module: "cli".to_string(),
+            },
+            FileCoupling {
+                from_file: "main.rs".to_string(),
+                to_module: "format".to_string(),
+            },
+            FileCoupling {
+                from_file: "repl.rs".to_string(),
+                to_module: "cli".to_string(),
+            },
+        ];
+        let result = format_couplings(&couplings);
+        assert!(result.contains("main.rs"));
+        assert!(result.contains("cli"));
+        assert!(result.contains("Most depended-on"));
+        // cli has 2 dependents
+        assert!(result.contains("cli: 2 dependents"));
     }
 }
