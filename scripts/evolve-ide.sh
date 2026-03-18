@@ -26,16 +26,50 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
-# Cross-platform Python detection (python3 on Linux/macOS, python or py on Windows)
+# Cross-platform Python detection (prefer local venv; avoid Windows Store python stub)
 PYTHON=""
-for cmd in python3 python py; do
-    if command -v "$cmd" &>/dev/null && "$cmd" -c "import sys; assert sys.version_info >= (3, 7)" 2>/dev/null; then
-        PYTHON="$cmd"
-        break
+
+_python_is_usable() {
+    local cmd="$1"
+    local err
+    err="$(mktemp)"
+    if "$cmd" -c "import sys; assert sys.version_info >= (3, 7)" 2>"$err"; then
+        # Windows Store "python" stub prints a message even when it exits 0.
+        if grep -q "Python was not found" "$err" 2>/dev/null; then
+            rm -f "$err"
+            return 1
+        fi
+        rm -f "$err"
+        return 0
     fi
-done
+    rm -f "$err"
+    return 1
+}
+
+# Prefer project venv if present
+if [ -x ".venv/Scripts/python.exe" ]; then
+    PYTHON=".venv/Scripts/python.exe"
+elif [ -x ".venv/bin/python" ]; then
+    PYTHON=".venv/bin/python"
+fi
+
+if [ -n "$PYTHON" ] && ! _python_is_usable "$PYTHON"; then
+    PYTHON=""
+fi
+
 if [ -z "$PYTHON" ]; then
-    echo "WARNING: No Python 3.7+ found. Issue fetching and formatting will be skipped." >&2
+    for cmd in python3 python py; do
+        if command -v "$cmd" &>/dev/null && _python_is_usable "$cmd"; then
+            PYTHON="$cmd"
+            break
+        fi
+    done
+fi
+
+if [ -z "$PYTHON" ]; then
+    echo "WARNING: No usable Python 3.7+ found (or 'python' is the Windows Store stub)." >&2
+    echo "         Issue fetching/formatting will be skipped." >&2
+    echo "         Fix: create/activate .venv (py -3 -m venv .venv), or install Python, or use 'py -3'." >&2
 fi
 
 REPO="${REPO:-Qonsult1001/EvolveLAM}"
