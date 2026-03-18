@@ -393,7 +393,7 @@ phase_next_task() {
             [ -z "$inum" ] && continue
             FALLBACK_RESPONSES="${FALLBACK_RESPONSES}
 - #${inum}: partial — planning failed, will revisit next session"
-        done < <(grep '^### Issue #' "$ISSUES_FILE" 2>/dev/null || true)
+        done <<< "$(grep '^### Issue #' "$ISSUES_FILE" 2>/dev/null || true)"
         cat > SESSION_PLAN.md <<FALLBACK
 ## Session Plan
 
@@ -601,42 +601,45 @@ phase_finish() {
     echo "  Phase C: Issue responses..."
     if [ ! -f ISSUE_RESPONSE.md ] && grep -qi '^### Issue Responses' SESSION_PLAN.md 2>/dev/null; then
         RESP=""
-        while IFS= read -r resp_line; do
-            issue_num=$(echo "$resp_line" | grep -oE '#[0-9]+' | head -1 | tr -d '#')
-            [ -z "$issue_num" ] && continue
+        RESP_LINES="$(sed -n '/^### [Ii]ssue [Rr]esponses/,/^### /p' SESSION_PLAN.md | grep '^- #' || true)"
+        if [ -n "$RESP_LINES" ]; then
+            while IFS= read -r resp_line; do
+                issue_num=$(echo "$resp_line" | grep -oE '#[0-9]+' | head -1 | tr -d '#' || true)
+                [ -z "$issue_num" ] && continue
 
-            if echo "$resp_line" | grep -qi 'wontfix'; then
-                status="wontfix"
-            elif echo "$resp_line" | grep -qi 'reply'; then
-                status="reply"
-            elif echo "$resp_line" | grep -qi 'partial'; then
-                status="partial"
-            elif echo "$resp_line" | grep -qi 'implement'; then
-                if git log --oneline "$SESSION_START_SHA"..HEAD --format="%s" | grep -qE "#${issue_num}([^0-9]|$)"; then
-                    status="fixed"
+                if echo "$resp_line" | grep -qi 'wontfix'; then
+                    status="wontfix"
+                elif echo "$resp_line" | grep -qi 'reply'; then
+                    status="reply"
+                elif echo "$resp_line" | grep -qi 'partial'; then
+                    status="partial"
+                elif echo "$resp_line" | grep -qi 'implement'; then
+                    if git log --oneline "$SESSION_START_SHA"..HEAD --format="%s" | grep -qE "#${issue_num}([^0-9]|$)"; then
+                        status="fixed"
+                    else
+                        status="partial"
+                    fi
                 else
                     status="partial"
                 fi
-            else
-                status="partial"
-            fi
 
-            if echo "$resp_line" | grep -q '— '; then
-                reason=$(echo "$resp_line" | sed 's/.*— //')
-            else
-                reason=$(echo "$resp_line" | sed -E 's/^- #[0-9]+: *[a-zA-Z]+ - //')
-            fi
-            [ -z "$reason" ] && reason="Addressed in this session."
+                if echo "$resp_line" | grep -q '— '; then
+                    reason=$(echo "$resp_line" | sed 's/.*— //')
+                else
+                    reason=$(echo "$resp_line" | sed -E 's/^- #[0-9]+: *[a-zA-Z]+ - //')
+                fi
+                [ -z "$reason" ] && reason="Addressed in this session."
 
-            if [ -n "$RESP" ]; then
-                RESP="${RESP}
+                if [ -n "$RESP" ]; then
+                    RESP="${RESP}
 ---
 "
-            fi
-            RESP="${RESP}issue_number: ${issue_num}
+                fi
+                RESP="${RESP}issue_number: ${issue_num}
 status: ${status}
 comment: ${reason}"
-        done < <(sed -n '/^### [Ii]ssue [Rr]esponses/,/^### /p' SESSION_PLAN.md | grep '^- #')
+            done <<< "$RESP_LINES"
+        fi
 
         if [ -n "$RESP" ]; then
             echo "$RESP" > ISSUE_RESPONSE.md
