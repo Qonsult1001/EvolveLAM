@@ -449,6 +449,39 @@ impl ConnectionGraph {
         conns
     }
 
+    /// Shortest path between two concepts (BFS across all edges). Returns the sequence of concepts or None.
+    pub fn shortest_path(&self, from: &str, to: &str) -> Option<Vec<String>> {
+        if from == to {
+            return Some(vec![from.to_string()]);
+        }
+        use std::collections::VecDeque;
+        let mut queue = VecDeque::new();
+        let mut parent: std::collections::HashMap<String, Option<String>> = std::collections::HashMap::new();
+        queue.push_back(from.to_string());
+        parent.insert(from.to_string(), None);
+        while let Some(node) = queue.pop_front() {
+            if node == to {
+                let mut path = vec![to.to_string()];
+                let mut cur = &node;
+                while let Some(Some(p)) = parent.get(cur) {
+                    path.push(p.clone());
+                    cur = p;
+                }
+                path.reverse();
+                return Some(path);
+            }
+            if let Some(edges) = self.edges.get(&node) {
+                for c in edges {
+                    if !parent.contains_key(&c.to) {
+                        parent.insert(c.to.clone(), Some(node.clone()));
+                        queue.push_back(c.to.clone());
+                    }
+                }
+            }
+        }
+        None
+    }
+
     /// Find all concepts connected to a given concept (neighbors in the graph).
     #[allow(dead_code)] // API for future REPL commands
     pub fn neighbors(&self, concept: &str) -> Vec<String> {
