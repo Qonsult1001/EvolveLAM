@@ -450,13 +450,15 @@ impl ConnectionGraph {
     }
 
     /// Shortest path between two concepts (BFS across all edges). Returns the sequence of concepts or None.
+    #[allow(dead_code)] // used by handle_graph_path in commands.rs
     pub fn shortest_path(&self, from: &str, to: &str) -> Option<Vec<String>> {
         if from == to {
             return Some(vec![from.to_string()]);
         }
         use std::collections::VecDeque;
         let mut queue = VecDeque::new();
-        let mut parent: std::collections::HashMap<String, Option<String>> = std::collections::HashMap::new();
+        let mut parent: std::collections::HashMap<String, Option<String>> =
+            std::collections::HashMap::new();
         queue.push_back(from.to_string());
         parent.insert(from.to_string(), None);
         while let Some(node) = queue.pop_front() {
@@ -470,11 +472,21 @@ impl ConnectionGraph {
                 path.reverse();
                 return Some(path);
             }
+            // Out-edges
             if let Some(edges) = self.edges.get(&node) {
                 for c in edges {
                     if !parent.contains_key(&c.to) {
                         parent.insert(c.to.clone(), Some(node.clone()));
                         queue.push_back(c.to.clone());
+                    }
+                }
+            }
+            // Reverse edges (graph is traversed bidirectionally for path finding)
+            for (source, edges) in &self.edges {
+                for c in edges {
+                    if c.to == node && !parent.contains_key(source) {
+                        parent.insert(source.clone(), Some(node.clone()));
+                        queue.push_back(source.clone());
                     }
                 }
             }
@@ -601,6 +613,36 @@ impl ConnectionGraph {
             }
         }
         counts
+    }
+
+    /// Search for concepts by case-insensitive substring match.
+    /// Returns matching concept names with their total connection count (outgoing + incoming).
+    pub fn search_concepts(&self, query: &str) -> Vec<(String, usize)> {
+        if query.is_empty() {
+            return Vec::new();
+        }
+        let query_lower = query.to_lowercase();
+
+        // Collect all unique concept names
+        let mut all_nodes: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        for (source, edges) in &self.edges {
+            all_nodes.insert(source);
+            for conn in edges {
+                all_nodes.insert(&conn.to);
+            }
+        }
+
+        // Filter by substring match and count connections
+        let mut results: Vec<(String, usize)> = all_nodes
+            .into_iter()
+            .filter(|name| name.to_lowercase().contains(&query_lower))
+            .map(|name| {
+                let (out, inc) = self.neighbors_detailed(name);
+                (name.to_string(), out.len() + inc.len())
+            })
+            .collect();
+        results.sort_by(|a, b| a.0.cmp(&b.0));
+        results
     }
 
     /// Get the total number of connections in the graph.
@@ -1374,5 +1416,74 @@ mod tests {
         assert_eq!(final_load.entries[1].note, "third");
 
         cleanup(&path);
+    }
+
+    #[test]
+    fn test_shortest_path_direct() {
+        let mut graph = ConnectionGraph::default();
+        graph.activate_connection("a", "b", ConnectionKind::Semantic);
+        let path = graph.shortest_path("a", "b");
+        assert_eq!(path, Some(vec!["a".to_string(), "b".to_string()]));
+    }
+
+    #[test]
+    fn test_shortest_path_multi_hop() {
+        let mut graph = ConnectionGraph::default();
+        graph.activate_connection("a", "b", ConnectionKind::Semantic);
+        graph.activate_connection("b", "c", ConnectionKind::Causal);
+        graph.activate_connection("c", "d", ConnectionKind::Temporal);
+        let path = graph.shortest_path("a", "d");
+        assert_eq!(
+            path,
+            Some(vec![
+                "a".to_string(),
+                "b".to_string(),
+                "c".to_string(),
+                "d".to_string()
+            ])
+        );
+    }
+
+    #[test]
+    fn test_shortest_path_no_path() {
+        let mut graph = ConnectionGraph::default();
+        graph.activate_connection("a", "b", ConnectionKind::Semantic);
+        graph.activate_connection("c", "d", ConnectionKind::Semantic);
+        let path = graph.shortest_path("a", "d");
+        assert_eq!(path, None);
+    }
+
+    #[test]
+    fn test_shortest_path_self() {
+        let mut graph = ConnectionGraph::default();
+        graph.activate_connection("a", "b", ConnectionKind::Semantic);
+        let path = graph.shortest_path("a", "a");
+        assert_eq!(path, Some(vec!["a".to_string()]));
+    }
+
+    #[test]
+    fn test_shortest_path_reverse_direction() {
+        let mut graph = ConnectionGraph::default();
+        graph.activate_connection("a", "b", ConnectionKind::Causal);
+        let path = graph.shortest_path("b", "a");
+        assert_eq!(path, Some(vec!["b".to_string(), "a".to_string()]));
+    }
+
+    #[test]
+    fn test_shortest_path_picks_shortest() {
+        let mut graph = ConnectionGraph::default();
+        graph.activate_connection("a", "d", ConnectionKind::Semantic);
+        graph.activate_connection("a", "b", ConnectionKind::Semantic);
+        graph.activate_connection("b", "c", ConnectionKind::Semantic);
+        graph.activate_connection("c", "d", ConnectionKind::Semantic);
+        let path = graph.shortest_path("a", "d").unwrap();
+        assert_eq!(path.len(), 2, "BFS should find the 1-hop path");
+    }
+
+    #[test]
+    fn test_shortest_path_empty_graph() {
+        let graph = ConnectionGraph::default();
+        let path = graph.shortest_path("a", "b");
+        assert_eq!(path, None);
     }
 }

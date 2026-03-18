@@ -92,7 +92,7 @@ pub const GIT_SUBCOMMANDS: &[&str] = &["status", "log", "add", "diff", "branch",
 pub const PR_SUBCOMMANDS: &[&str] = &["list", "view", "diff", "comment", "create", "checkout"];
 
 /// Graph subcommand names for `/graph <Tab>` completion.
-pub const GRAPH_SUBCOMMANDS: &[&str] = &["downstream", "neighbors", "info", "activate"];
+pub const GRAPH_SUBCOMMANDS: &[&str] = &["downstream", "neighbors", "info", "activate", "search"];
 
 /// Return context-aware argument completions for a given command and partial argument.
 ///
@@ -641,6 +641,8 @@ pub fn handle_graph(input: &str) {
         handle_graph_info();
     } else if let Some(args) = rest.strip_prefix("activate") {
         handle_graph_activate(args.trim());
+    } else if let Some(args) = rest.strip_prefix("search") {
+        handle_graph_search(args.trim());
     } else {
         print_graph_help();
     }
@@ -650,7 +652,8 @@ fn print_graph_help() {
     println!("{DIM}  usage: /graph downstream <concept>   Show causal downstream");
     println!("         /graph neighbors <concept>   Show all connections for a concept");
     println!("         /graph info                  Show graph statistics");
-    println!("         /graph activate <from> <to> <kind>  Activate a connection{RESET}\n");
+    println!("         /graph activate <from> <to> <kind>  Activate a connection");
+    println!("         /graph search <query>        Search concepts by substring{RESET}\n");
 }
 
 fn handle_graph_downstream(concept: &str) {
@@ -793,6 +796,24 @@ fn handle_graph_activate(args: &str) {
         Err(e) => {
             eprintln!("{RED}  error saving graph: {e}{RESET}\n");
         }
+    }
+}
+
+fn handle_graph_search(query: &str) {
+    if query.is_empty() {
+        println!("{DIM}  usage: /graph search <query>{RESET}\n");
+        return;
+    }
+    let graph = crate::memory::ConnectionGraph::load();
+    let results = graph.search_concepts(query);
+    if results.is_empty() {
+        println!("{DIM}  No concepts matching \"{query}\".{RESET}\n");
+    } else {
+        println!("  Concepts matching \"{query}\":");
+        for (name, conn_count) in &results {
+            println!("    {name} ({conn_count} connections)");
+        }
+        println!();
     }
 }
 
