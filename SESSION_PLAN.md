@@ -1,9 +1,14 @@
 ## Session Plan
 
-### Task 1: Fix evolve-ide.sh SESSION_START_SHA when finish runs without session metadata
-Files: scripts/evolve-ide.sh
-Description: When finish runs without having run setup in this session (or .evolve/metadata.sh is missing), SESSION_START_SHA is never set and the script hits "unbound variable" with set -u. After load_metadata in phase_finish, set SESSION_START_SHA="${SESSION_START_SHA:-$(git rev-parse HEAD)}" so the variable is always defined; use HEAD as the session start when no metadata exists. Add the same default after load_metadata in any other phase that uses SESSION_START_SHA, or set it once at top of phase_finish after load_metadata.
+### Task 1: Update KNOWN_MODELS with current Claude model aliases
+Files: src/commands.rs
+Description: The KNOWN_MODELS array used for `/model <Tab>` completion is missing the shorter model aliases that are now standard: `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-5`. These are the current canonical model IDs. Add them alongside the existing dated variants for backwards compatibility. Also add `nul` to .gitignore (Windows artifact from bash /dev/null redirect).
+Issue: none
+
+### Task 2: Add shortest-path query to the connection graph (`/graph path`)
+Files: src/memory.rs, src/commands.rs (handle_graph dispatch)
+Description: Implement `shortest_path(from: &str, to: &str) -> Option<Vec<String>>` on ConnectionGraph using BFS across all edge types. Returns the sequence of concepts from source to target, or None if no path exists. Wire it into the REPL as `/graph path <from> <to>`. Add "path" to GRAPH_SUBCOMMANDS. Tests: path found (A→B→C), no path between disconnected concepts, direct neighbor path, self-path returns just the concept. This makes the connection graph useful as an exploration tool — "how are these two ideas connected?"
 Issue: none
 
 ### Issue Responses
-- No community issues today.
+(No community issues today.)
