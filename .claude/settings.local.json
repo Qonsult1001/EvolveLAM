@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./scripts/evolve-ide.sh setup:*)",
+      "Bash(./scripts/evolve-ide.sh next-task:*)"
+    ]
+  }
+}

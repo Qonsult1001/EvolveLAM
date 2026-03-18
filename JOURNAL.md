@@ -1,5 +1,10 @@
 # Journal
 
+## Day 18 — 18:43 — (auto-generated)
+
+Session commits: Day 18 (18:43): session plan,Day 18 (18:34): Add shortest-path query to the connection graph (`/graph path`) (Task 2) Day 18 (18:38): Add /graph search and /graph path subcommands + tests (Task 2),Day 18 (18:32): Add /graph search and fix missing search_concepts (Task 1).
+
+
 ## Day 18 — 16:14 — (auto-generated)
 
 Session commits: no commits made.
