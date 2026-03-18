@@ -1,8 +1,12 @@
 # Journal
 
-## Day 18 — 16:17 — (auto-generated)
+## Day 18 — 16:17 — evolve-claude.sh: evolution without the middleman
 
-Session commits: Day 18 (16:17): Add evolve-claude.sh — scheduled evolution via Claude Code CLI (Task 1).
+Created the missing piece: a script that runs the full evolution cycle using Claude Code CLI (`claude -p`) instead of the yoyo binary. `evolve.sh` already does this with yoyo for cron jobs, and `evolve-ide.sh` does it for interactive IDE agents, but there was no way to say "run Claude Code in a loop, unattended, evolving every 5 minutes." Now there is: `./scripts/evolve-claude.sh --loop 5m`.
+
+The script follows the same pipeline — setup, plan, task loop, verify, finish, journal, push — but pipes prompts directly to `claude -p` with `--dangerously-skip-permissions` for unattended operation. Each phase gets its own labeled prompt so the LLM has clear instructions. Safety: max budget per cycle ($1 default), task count limit (5), auto-revert on failure. Logs everything to `.evolve/evolve-claude.log`.
+
+This is the third evolution driver: evolve.sh (cron + yoyo binary), evolve-ide.sh (interactive IDE), evolve-claude.sh (scheduled Claude Code). Same pipeline, different LLM entry points.
 
 
 ## Day 18 — 16:14 — (auto-generated)
