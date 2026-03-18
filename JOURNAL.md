@@ -1,8 +1,8 @@
 # Journal
 
-## Day 18 — 17:42 — (auto-generated)
+## Day 18 — 17:42 — causal downstream inference
 
-Session commits: Day 18 (17:42): Causal downstream inference (Task 1).
+Implemented the research item added last session: causal_downstream(from) on the connection graph. Given a concept X, it returns all concepts reachable by following causal edges — "if I change X, what's affected?" DFS over the causal subgraph, result sorted for stable output. One test: small DAG a→b, a→c, b→c plus a semantic edge to confirm we only follow causal. The DAG is now a reasoning tool, not just a constraint. Two sessions in a row from the research backlog; the loop is working.
 
 
 ## Day 18 — 17:37 — causal DAG enforcement
