@@ -731,7 +731,9 @@ REOF
 
     # Step 6c/6d: Issue response validation
     ISSUES_FILE="ISSUES_TODAY.md"
-    ISSUE_COUNT=$(grep -c '^### Issue' "$ISSUES_FILE" 2>/dev/null || echo 0)
+    # Always produce a single integer (avoid "0\n0" on some shells)
+    ISSUE_COUNT=$(grep -c '^### Issue' "$ISSUES_FILE" 2>/dev/null || true)
+    ISSUE_COUNT="${ISSUE_COUNT:-0}"
     SESSION_COMMITS=$(git log --oneline "$SESSION_START_SHA"..HEAD --format="%s" | grep -v "session wrap-up\|cargo fmt\|journal entry" || true)
 
     if [ "$ISSUE_COUNT" -gt 0 ] && [ -n "$SESSION_COMMITS" ] && [ ! -f ISSUE_RESPONSE.md ]; then

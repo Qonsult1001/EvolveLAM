@@ -367,6 +367,13 @@ pub async fn handle_spawn(
 mod tests {
     use super::*;
     use crate::cli::AUTO_SAVE_SESSION_PATH;
+    use std::sync::{Mutex, OnceLock};
+
+    static CWD_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn lock_cwd() -> std::sync::MutexGuard<'static, ()> {
+        CWD_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
 
     #[test]
     fn test_auto_save_session_path_constant() {
@@ -395,6 +402,8 @@ mod tests {
     fn test_auto_save_creates_directory_and_file() {
         use yoagent::agent::Agent;
         use yoagent::provider::AnthropicProvider;
+
+        let _cwd_guard = lock_cwd();
 
         // Use a temp directory to avoid polluting the project
         let tmp_dir = std::env::temp_dir().join("yoyo_test_autosave");
@@ -425,6 +434,8 @@ mod tests {
     #[test]
     fn test_continue_session_path_prefers_auto_save() {
         // Create a temp directory with .yoyo/last-session.json
+        let _cwd_guard = lock_cwd();
+
         let tmp_dir = std::env::temp_dir().join("yoyo_test_continue_path");
         let _ = std::fs::remove_dir_all(&tmp_dir);
         std::fs::create_dir_all(tmp_dir.join(".yoyo")).unwrap();
@@ -446,6 +457,8 @@ mod tests {
     #[test]
     fn test_continue_session_path_falls_back_to_default() {
         // Create a temp directory WITHOUT .yoyo/last-session.json
+        let _cwd_guard = lock_cwd();
+
         let tmp_dir = std::env::temp_dir().join("yoyo_test_continue_fallback");
         let _ = std::fs::remove_dir_all(&tmp_dir);
         std::fs::create_dir_all(&tmp_dir).unwrap();

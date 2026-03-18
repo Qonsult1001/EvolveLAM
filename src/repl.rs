@@ -604,6 +604,17 @@ pub async fn run_repl(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    static CWD_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn lock_cwd() -> std::sync::MutexGuard<'static, ()> {
+        CWD_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
+
+    fn crate_root() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    }
 
     #[test]
     fn test_needs_continuation_backslash() {
@@ -672,6 +683,10 @@ mod tests {
     #[test]
     fn test_file_path_completion_current_dir() {
         use rustyline::history::DefaultHistory;
+        let _cwd_guard = lock_cwd();
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(crate_root()).unwrap();
+
         let helper = YoyoHelper;
         let history = DefaultHistory::new();
         let ctx = rustyline::Context::new(&history);
@@ -680,11 +695,17 @@ mod tests {
         let (start, candidates) = helper.complete("Cargo", 5, &ctx).unwrap();
         assert_eq!(start, 0);
         assert!(candidates.iter().any(|c| c == "Cargo.toml"));
+
+        std::env::set_current_dir(original_dir).unwrap();
     }
 
     #[test]
     fn test_file_path_completion_with_directory_prefix() {
         use rustyline::history::DefaultHistory;
+        let _cwd_guard = lock_cwd();
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(crate_root()).unwrap();
+
         let helper = YoyoHelper;
         let history = DefaultHistory::new();
         let ctx = rustyline::Context::new(&history);
@@ -693,6 +714,8 @@ mod tests {
         let (start, candidates) = helper.complete("src/ma", 6, &ctx).unwrap();
         assert_eq!(start, 0);
         assert!(candidates.contains(&"src/main.rs".to_string()));
+
+        std::env::set_current_dir(original_dir).unwrap();
     }
 
     #[test]
@@ -710,6 +733,10 @@ mod tests {
     #[test]
     fn test_file_path_completion_after_text() {
         use rustyline::history::DefaultHistory;
+        let _cwd_guard = lock_cwd();
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(crate_root()).unwrap();
+
         let helper = YoyoHelper;
         let history = DefaultHistory::new();
         let ctx = rustyline::Context::new(&history);
@@ -719,11 +746,17 @@ mod tests {
         let (start, candidates) = helper.complete(input, input.len(), &ctx).unwrap();
         assert_eq!(start, 9); // "read the " is 9 chars
         assert!(candidates.contains(&"src/main.rs".to_string()));
+
+        std::env::set_current_dir(original_dir).unwrap();
     }
 
     #[test]
     fn test_file_path_completion_directories_have_slash() {
         use rustyline::history::DefaultHistory;
+        let _cwd_guard = lock_cwd();
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(crate_root()).unwrap();
+
         let helper = YoyoHelper;
         let history = DefaultHistory::new();
         let ctx = rustyline::Context::new(&history);
@@ -732,6 +765,8 @@ mod tests {
         let (start, candidates) = helper.complete("sr", 2, &ctx).unwrap();
         assert_eq!(start, 0);
         assert!(candidates.contains(&"src/".to_string()));
+
+        std::env::set_current_dir(original_dir).unwrap();
     }
 
     #[test]
@@ -830,6 +865,10 @@ mod tests {
     #[test]
     fn test_arg_completion_falls_through_to_file_path() {
         use rustyline::history::DefaultHistory;
+        let _cwd_guard = lock_cwd();
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(crate_root()).unwrap();
+
         let helper = YoyoHelper;
         let history = DefaultHistory::new();
         let ctx = rustyline::Context::new(&history);
@@ -839,11 +878,17 @@ mod tests {
         let (start, candidates) = helper.complete("/docs Cargo", 11, &ctx).unwrap();
         assert_eq!(start, 6); // after "/docs "
         assert!(candidates.iter().any(|c| c == "Cargo.toml"));
+
+        std::env::set_current_dir(original_dir).unwrap();
     }
 
     #[test]
     fn test_arg_completion_no_nested_spaces() {
         use rustyline::history::DefaultHistory;
+        let _cwd_guard = lock_cwd();
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(crate_root()).unwrap();
+
         let helper = YoyoHelper;
         let history = DefaultHistory::new();
         let ctx = rustyline::Context::new(&history);
@@ -858,5 +903,7 @@ mod tests {
             candidates.contains(&"src/".to_string()),
             "Second arg should use file path completion: {candidates:?}"
         );
+
+        std::env::set_current_dir(original_dir).unwrap();
     }
 }
