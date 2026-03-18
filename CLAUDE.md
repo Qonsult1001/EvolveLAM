@@ -31,6 +31,11 @@ ANTHROPIC_API_KEY=sk-... ./scripts/evolve.sh
 
 To run evolution from inside an IDE agent (Claude Code, Cursor, etc.):
 ```bash
+# Autonomous — one command, then follow the runbook
+./scripts/evolve-ide.sh all          # Setup + write .evolve/runbook.md
+# Read .evolve/runbook.md and follow it end-to-end (plan → tasks → finish)
+
+# Or step-by-step:
 ./scripts/evolve-ide.sh setup        # Build check, CI, fetch issues → .evolve/plan_prompt.md
 # Read .evolve/plan_prompt.md and act on it → create SESSION_PLAN.md
 ./scripts/evolve-ide.sh next-task    # Extract next task → .evolve/task_prompt.md

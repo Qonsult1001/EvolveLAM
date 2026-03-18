@@ -163,6 +163,18 @@ To trigger yoyo's self-improvement loop from inside any IDE agent (Claude Code,
 Cursor, Windsurf, etc.) — no API key needed, the IDE provides the LLM:
 
 ```bash
+# Autonomous (recommended) — one command, full evolution cycle
+./scripts/evolve-ide.sh all
+# Then read .evolve/runbook.md and follow it end-to-end
+```
+
+The `all` command runs build checks, fetches issues, and outputs a single runbook
+(`.evolve/runbook.md`) containing the plan prompt and full task loop instructions.
+The IDE agent reads it once and executes the entire evolution autonomously.
+
+For manual step-by-step control:
+
+```bash
 ./scripts/evolve-ide.sh setup        # 1. Build check, fetch issues → .evolve/plan_prompt.md
                                      # 2. Read .evolve/plan_prompt.md → create SESSION_PLAN.md
 ./scripts/evolve-ide.sh next-task    # 3. Get next task → .evolve/task_prompt.md
@@ -172,7 +184,7 @@ Cursor, Windsurf, etc.) — no API key needed, the IDE provides the LLM:
 ./scripts/evolve-ide.sh finish       # 7. Journal, issue responses, tag, push
 ```
 
-Or get started with `./scripts/evolve-ide.sh help`.
+Run `./scripts/evolve-ide.sh help` for details.
 
 See [How It Evolves](#how-it-evolves) for the full picture of CI vs IDE modes.
 
@@ -261,31 +273,32 @@ Every 4-8 hours, yoyo wakes up and:
     → Pushes and goes back to sleep
 ```
 
-### IDE Mode (`evolve-ide.sh`) — Interactive, runs inside your coding agent
+### IDE Mode (`evolve-ide.sh`) — Autonomous, runs inside your coding agent
 
 When you run yoyo's evolution from inside an IDE agent (Claude Code, Cursor, etc.),
 there's no need for the yoyo binary as a middleman — the IDE agent already has all
-the tools. `evolve-ide.sh` is a phased orchestrator that does the bash infrastructure
-and outputs structured prompts for the IDE to act on directly.
+the tools. `evolve-ide.sh` handles all bash infrastructure (build checks, CI status,
+issue fetching, verification gates, rollbacks, issue posting, tagging, pushing) and
+outputs structured prompts for the IDE agent to execute.
 
 ```bash
-# 1. Setup — build check, CI status, fetch issues, write planning prompt
-./scripts/evolve-ide.sh setup
+# Autonomous — one command to start, then follow the runbook
+./scripts/evolve-ide.sh all
+# → Runs setup, then writes .evolve/runbook.md
+# → Read .evolve/runbook.md and follow it end-to-end
+# → The runbook contains the plan prompt + full task loop + finish instructions
+```
 
-# 2. Read .evolve/plan_prompt.md and act on it → create SESSION_PLAN.md
+The runbook drives the IDE agent through the same pipeline as CI mode:
+plan → implement each task → verify → journal → issue responses → push.
 
-# 3. Get the next task prompt
-./scripts/evolve-ide.sh next-task
+For manual step-by-step control, use individual subcommands:
 
-# 4. Read .evolve/task_prompt.md and act on it → implement + commit
-
-# 5. Verify the task (protected files, build, tests)
-./scripts/evolve-ide.sh verify-task
-
-# 6. Repeat 3-5 until next-task says "done"
-
-# 7. Finish — verify build, journal, issue responses, tag, push
-./scripts/evolve-ide.sh finish
+```bash
+./scripts/evolve-ide.sh setup        # Build check, CI, fetch issues
+./scripts/evolve-ide.sh next-task    # Extract next task from plan
+./scripts/evolve-ide.sh verify-task  # Verification gate (build, tests)
+./scripts/evolve-ide.sh finish       # Journal, issues, tag, push
 ```
 
 Environment variables:

@@ -840,14 +840,90 @@ case "${1:-help}" in
         phase_finish
         ;;
     all)
-        echo "Running all phases. Prompts will be written to $EVOLVE_DIR/"
-        echo "You (the IDE agent) must act on each prompt between phases."
-        echo ""
+        # Run setup (build check, CI, issues) then output a single runbook
+        # that the IDE agent follows autonomously end-to-end.
         phase_setup
+
+        # Build the runbook: plan prompt + full loop instructions
+        PLAN_CONTENT=$(cat "$EVOLVE_DIR/plan_prompt.md")
+        cat > "$EVOLVE_DIR/runbook.md" <<'RUNBOOK_HEADER'
+# Autonomous Evolution Runbook
+
+Follow these steps IN ORDER. Do not skip any step. Do not stop until step 5.
+
+---
+
+## Step 1: Create the Session Plan
+
+Read the planning prompt below and act on it. Your deliverable is SESSION_PLAN.md.
+
+RUNBOOK_HEADER
+
+        # Inline the plan prompt content
+        cat "$EVOLVE_DIR/plan_prompt.md" >> "$EVOLVE_DIR/runbook.md"
+
+        cat >> "$EVOLVE_DIR/runbook.md" <<'RUNBOOK_LOOP'
+
+---
+
+## Step 2: Task Loop
+
+After creating and committing SESSION_PLAN.md, run this loop:
+
+```
+REPEAT:
+  a. Run: ./scripts/evolve-ide.sh next-task
+  b. If output says "No more tasks" or "done" → go to Step 3
+  c. Read .evolve/task_prompt.md and implement the task described in it
+  d. Run: ./scripts/evolve-ide.sh verify-task
+  e. Read the output — if it says REVERTED, note the failure and continue
+  f. Go back to (a)
+```
+
+For each task:
+- Read the task prompt carefully — it tells you exactly what to implement
+- Follow the evolve skill rules (test first, surgical edits, cargo fmt/clippy/build/test)
+- Commit after each task passes all checks
+- Do NOT skip verify-task — it checks for protected files, build, and tests
+
+---
+
+## Step 3: Finish
+
+Run: ./scripts/evolve-ide.sh finish
+
+This will:
+- Extract and post issue responses from SESSION_PLAN.md
+- Verify the final build (auto-fixes formatting)
+- Write a fallback journal entry if you haven't written one
+- Tag the known-good state
+- Push to the designated branch
+
+If finish reports build errors and writes .evolve/fix_prompt.md:
+- Read .evolve/fix_prompt.md and fix the errors
+- Re-run: ./scripts/evolve-ide.sh finish
+
+---
+
+## Step 4: Journal & Reflection
+
+If .evolve/journal_prompt.md exists after finish, read it and write the journal entry.
+If .evolve/reflect_prompt.md exists, read it and reflect (only if genuinely novel insight).
+
+---
+
+## Step 5: Done
+
+The evolution session is complete. Report what was accomplished.
+RUNBOOK_LOOP
+
         echo ""
         echo "========================================="
-        echo "Phase A complete. Act on $EVOLVE_DIR/plan_prompt.md now."
-        echo "Then run: ./scripts/evolve-ide.sh next-task"
+        echo "→ Runbook written to $EVOLVE_DIR/runbook.md"
+        echo ""
+        echo "READ $EVOLVE_DIR/runbook.md AND FOLLOW IT END-TO-END."
+        echo "It contains the planning prompt and full loop instructions."
+        echo "========================================="
         ;;
     help|--help|-h)
         echo "Usage: ./scripts/evolve-ide.sh <command>"
@@ -859,7 +935,7 @@ case "${1:-help}" in
         echo "               Writes task prompt to .evolve/task_prompt.md"
         echo "  verify-task  Run verification gate on the current task."
         echo "  finish       Final build check, journal, issue responses, push."
-        echo "  all          Run setup phase (start here)."
+        echo "  all          Run setup + output full runbook for autonomous execution."
         echo ""
         echo "Workflow:"
         echo "  1. ./scripts/evolve-ide.sh setup"
