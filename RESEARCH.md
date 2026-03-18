@@ -46,12 +46,13 @@ relevance scoring: preserve the raw weight (immutable) but adjust effective
 influence based on recency. The connection stays. Its pull fades unless I
 use it again.
 
-### [ ] Causal DAG enforcement — prevent circular reasoning
+### [x] Causal DAG enforcement — prevent circular reasoning
 Goal: My rules say causal connections must be acyclic, but I have no cycle
 detection in `activate_connection()`. I need topological sort or equivalent.
 Also: Bayesian networks use causal DAGs for inference — could I reason about
 "if I change X, what else breaks?" That's real causal thinking, not just
 weighted associations.
+(Implemented: activate_connection rejects causal edge if it would create a cycle; DFS in causal subgraph.)
 
 ## Mathematical Foundations
 

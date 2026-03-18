@@ -267,10 +267,62 @@ impl ConnectionGraph {
         graph
     }
 
+    /// Returns true if adding a causal edge from→to would create a cycle in the causal subgraph.
+    /// Causal connections must remain acyclic (DAG).
+    fn would_causal_cycle(&self, from: &str, to: &str) -> bool {
+        // Build causal out-edges: node -> list of targets (causal only)
+        let mut out: HashMap<String, Vec<String>> = HashMap::new();
+        for (source, conns) in &self.edges {
+            for c in conns {
+                if c.kind == ConnectionKind::Causal {
+                    out.entry(source.clone()).or_default().push(c.to.clone());
+                }
+            }
+        }
+        // Adding from→to would create a cycle iff there is already a path from to → from
+        self.has_path_causal(&out, to, from)
+    }
+
+    /// DFS in the causal subgraph: is there a path from `start` to `target`?
+    fn has_path_causal(
+        &self,
+        out: &HashMap<String, Vec<String>>,
+        start: &str,
+        target: &str,
+    ) -> bool {
+        let mut stack = vec![start.to_string()];
+        let mut seen = std::collections::HashSet::new();
+        while let Some(node) = stack.pop() {
+            if node == target {
+                return true;
+            }
+            if !seen.insert(node.clone()) {
+                continue;
+            }
+            if let Some(neighbors) = out.get(&node) {
+                for n in neighbors {
+                    stack.push(n.clone());
+                }
+            }
+        }
+        false
+    }
+
     /// Strengthen a connection between two concepts (or create it).
     /// Returns the new weight after strengthening.
+    /// Causal edges are rejected if they would create a cycle (DAG enforcement).
     pub fn activate_connection(&mut self, from: &str, to: &str, kind: ConnectionKind) -> f64 {
         let timestamp = current_timestamp();
+
+        // Causal DAG: reject edge if it would create a cycle
+        if kind == ConnectionKind::Causal && self.would_causal_cycle(from, to) {
+            return self
+                .edges
+                .get(from)
+                .and_then(|v| v.iter().find(|c| c.to == to))
+                .map(|c| c.weight)
+                .unwrap_or(0.1);
+        }
 
         // Increment node activations
         *self.node_activations.entry(from.to_string()).or_insert(0) += 1;
@@ -821,6 +873,31 @@ mod tests {
         assert!(n.contains(&"b".to_string()));
         assert!(n.contains(&"c".to_string()));
         assert!(n.contains(&"d".to_string())); // Found via reverse lookup
+    }
+
+    #[test]
+    fn test_causal_dag_rejects_cycle() {
+        let mut graph = ConnectionGraph::default();
+        graph.activate_connection("a", "b", ConnectionKind::Causal);
+        graph.activate_connection("b", "c", ConnectionKind::Causal);
+        assert_eq!(graph.connection_count(), 2);
+        // Adding c→a would create cycle a→b→c→a; must be rejected
+        let w = graph.activate_connection("c", "a", ConnectionKind::Causal);
+        assert_eq!(w, 0.1, "Should return default weight without adding");
+        assert_eq!(
+            graph.connection_count(),
+            2,
+            "Causal cycle edge must not be added"
+        );
+    }
+
+    #[test]
+    fn test_causal_dag_accepts_acyclic() {
+        let mut graph = ConnectionGraph::default();
+        graph.activate_connection("a", "b", ConnectionKind::Causal);
+        graph.activate_connection("a", "c", ConnectionKind::Causal);
+        graph.activate_connection("b", "c", ConnectionKind::Causal); // No cycle: a→b→c, a→c
+        assert_eq!(graph.connection_count(), 3);
     }
 
     #[test]
