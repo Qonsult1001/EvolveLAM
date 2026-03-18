@@ -2,7 +2,12 @@
   "permissions": {
     "allow": [
       "Bash(./scripts/evolve-ide.sh setup:*)",
-      "Bash(./scripts/evolve-ide.sh next-task:*)"
+      "Bash(./scripts/evolve-ide.sh next-task:*)",
+      "Bash(cargo build:*)",
+      "Bash(cargo test:*)",
+      "Bash(./scripts/evolve-ide.sh verify-task:*)",
+      "Bash(cargo fmt:*)",
+      "Bash(cargo clippy:*)"
     ]
   }
 }
