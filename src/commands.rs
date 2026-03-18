@@ -895,9 +895,10 @@ mod tests {
         extract_first_meaningful_line, find_files, fix_strategy, format_error_classification,
         format_project_index, format_tree_from_paths, fuzzy_score, generate_init_content,
         health_checks_for_project, highlight_match, is_binary_extension, lint_command_for_project,
-        run_health_check_for_project, run_health_checks_full_output,
+        parse_test_summary, run_health_check_for_project, run_health_checks_full_output,
         run_health_checks_with_classification, run_shell_command, scan_important_dirs,
         scan_important_files, test_command_for_project, IndexEntry, ProjectType, RustErrorCategory,
+        TestSummary,
     };
     use crate::commands_session::{parse_bookmark_name, parse_spawn_task, Bookmarks};
     use crate::memory::{
@@ -3493,5 +3494,74 @@ mod tests {
             results.is_empty(),
             "Unknown project type should have no checks"
         );
+    }
+
+    // ── parse_test_summary tests ──────────────────────────────────────
+
+    #[test]
+    fn test_parse_test_summary_single_result_line() {
+        let output = "test result: ok. 42 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 1.23s\n";
+        let summary = parse_test_summary(output);
+        assert_eq!(
+            summary,
+            Some(TestSummary {
+                passed: 42,
+                failed: 0,
+                ignored: 3
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_test_summary_multiple_result_lines() {
+        // Simulates unit tests + integration tests output
+        let output = "\
+running 684 tests
+...
+test result: ok. 684 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.42s
+
+running 67 tests
+...
+test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 2.78s
+";
+        let summary = parse_test_summary(output);
+        assert_eq!(
+            summary,
+            Some(TestSummary {
+                passed: 751,
+                failed: 0,
+                ignored: 1
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_test_summary_failed_result() {
+        let output = "test result: FAILED. 10 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.5s\n";
+        let summary = parse_test_summary(output);
+        assert_eq!(
+            summary,
+            Some(TestSummary {
+                passed: 10,
+                failed: 2,
+                ignored: 0
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_test_summary_no_result_lines() {
+        let output = "Compiling yoyo v0.1.0\nsome random output\n";
+        let summary = parse_test_summary(output);
+        assert!(
+            summary.is_none(),
+            "Should return None when no test result lines found"
+        );
+    }
+
+    #[test]
+    fn test_parse_test_summary_empty_input() {
+        let summary = parse_test_summary("");
+        assert!(summary.is_none());
     }
 }

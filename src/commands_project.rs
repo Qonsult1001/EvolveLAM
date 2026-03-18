@@ -895,6 +895,71 @@ pub fn test_command_for_project(
     }
 }
 
+/// Parsed summary of a cargo test result line.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TestSummary {
+    pub passed: u32,
+    pub failed: u32,
+    pub ignored: u32,
+}
+
+/// Parse cargo test output for "test result:" lines and return aggregated totals.
+/// Handles multiple result lines (e.g., unit tests + integration tests).
+/// Returns None if no test result lines are found.
+pub fn parse_test_summary(output: &str) -> Option<TestSummary> {
+    let mut total = TestSummary {
+        passed: 0,
+        failed: 0,
+        ignored: 0,
+    };
+    let mut found = false;
+
+    for line in output.lines() {
+        let trimmed = line.trim();
+        // Match: "test result: ok. N passed; N failed; N ignored; ..."
+        // or:    "test result: FAILED. N passed; N failed; N ignored; ..."
+        if !trimmed.starts_with("test result:") {
+            continue;
+        }
+        found = true;
+        // Extract numbers by finding "N passed", "N failed", "N ignored"
+        for part in trimmed.split(';') {
+            let part = part.trim();
+            if part.ends_with("passed") {
+                if let Some(n) = extract_leading_number(part) {
+                    total.passed += n;
+                }
+            } else if part.ends_with("failed") {
+                if let Some(n) = extract_leading_number(part) {
+                    total.failed += n;
+                }
+            } else if part.ends_with("ignored") {
+                if let Some(n) = extract_leading_number(part) {
+                    total.ignored += n;
+                }
+            }
+        }
+    }
+
+    if found {
+        Some(total)
+    } else {
+        None
+    }
+}
+
+/// Extract a leading number from a string like "684 passed" or "0 failed".
+fn extract_leading_number(s: &str) -> Option<u32> {
+    // Find the first sequence of digits in the string
+    let digits: String = s
+        .trim()
+        .chars()
+        .skip_while(|c| !c.is_ascii_digit())
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    digits.parse().ok()
+}
+
 /// Handle the /test command: auto-detect project type and run tests.
 /// Returns a summary string suitable for AI context.
 pub fn handle_test() -> Option<String> {
@@ -934,12 +999,37 @@ pub fn handle_test() -> Option<String> {
                 eprint!("{stderr}");
             }
 
+            // Parse test result summary from combined output
+            let combined = format!("{stdout}{stderr}");
+            let test_summary = parse_test_summary(&combined);
+
             if o.status.success() {
-                println!("\n{GREEN}  ✓ Tests passed ({elapsed}){RESET}\n");
-                Some(format!("Tests passed ({elapsed}): {label}"))
+                if let Some(ref ts) = test_summary {
+                    println!(
+                        "\n{GREEN}  ✓ Tests passed ({elapsed}): {} passed, {} failed, {} ignored{RESET}\n",
+                        ts.passed, ts.failed, ts.ignored
+                    );
+                } else {
+                    println!("\n{GREEN}  ✓ Tests passed ({elapsed}){RESET}\n");
+                }
+                let mut msg = format!("Tests passed ({elapsed}): {label}");
+                if let Some(ref ts) = test_summary {
+                    msg.push_str(&format!(
+                        " — {} passed, {} failed, {} ignored",
+                        ts.passed, ts.failed, ts.ignored
+                    ));
+                }
+                Some(msg)
             } else {
                 let code = o.status.code().unwrap_or(-1);
-                println!("\n{RED}  ✗ Tests failed (exit {code}, {elapsed}){RESET}\n");
+                if let Some(ref ts) = test_summary {
+                    println!(
+                        "\n{RED}  ✗ Tests failed (exit {code}, {elapsed}): {} passed, {} failed, {} ignored{RESET}\n",
+                        ts.passed, ts.failed, ts.ignored
+                    );
+                } else {
+                    println!("\n{RED}  ✗ Tests failed (exit {code}, {elapsed}){RESET}\n");
+                }
                 let mut summary = format!("Tests FAILED (exit {code}, {elapsed}): {label}");
                 // Include a preview of the error output for AI context
                 let error_text = if !stderr.is_empty() {
