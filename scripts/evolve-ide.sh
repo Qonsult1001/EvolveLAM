@@ -26,6 +26,18 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
+# Cross-platform Python detection (python3 on Linux/macOS, python or py on Windows)
+PYTHON=""
+for cmd in python3 python py; do
+    if command -v "$cmd" &>/dev/null && "$cmd" -c "import sys; assert sys.version_info >= (3, 7)" 2>/dev/null; then
+        PYTHON="$cmd"
+        break
+    fi
+done
+if [ -z "$PYTHON" ]; then
+    echo "WARNING: No Python 3.7+ found. Issue fetching and formatting will be skipped." >&2
+fi
+
 REPO="${REPO:-Qonsult1001/EvolveLAM}"
 BRANCH="${BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
 TIMEOUT="${TIMEOUT:-600}"
@@ -34,7 +46,7 @@ DATE=$(date +%Y-%m-%d)
 SESSION_TIME=$(date +%H:%M)
 
 # Security nonce for content boundary markers
-BOUNDARY_NONCE=$(python3 -c "import os; print(os.urandom(16).hex())" 2>/dev/null || echo "fallback-$(date +%s)")
+BOUNDARY_NONCE=$( [ -n "$PYTHON" ] && $PYTHON -c "import os; print(os.urandom(16).hex())" 2>/dev/null || echo "fallback-$(date +%s)")
 BOUNDARY_BEGIN="[BOUNDARY-${BOUNDARY_NONCE}-BEGIN]"
 BOUNDARY_END="[BOUNDARY-${BOUNDARY_NONCE}-END]"
 
@@ -94,8 +106,14 @@ phase_setup() {
 
     # Step 1: Verify build
     echo "→ Checking build..."
-    cargo build --quiet
-    cargo test --quiet
+    if [ "${EVOLVE_IDE_QUIET:-}" = "1" ]; then
+        # In 'all' mode, suppress verbose test output so instructions are prominent
+        cargo build --quiet 2>&1 | tail -5
+        cargo test --quiet 2>&1 | tail -3
+    else
+        cargo build --quiet
+        cargo test --quiet
+    fi
     echo "  Build OK."
     echo ""
 
@@ -125,7 +143,13 @@ $CI_LOGS"
     [ ! -f "$SPONSORS_FILE" ] && echo '[]' > "$SPONSORS_FILE"
 
     echo "→ Fetching community issues..."
-    if command -v gh &>/dev/null; then
+    if ! command -v gh &>/dev/null; then
+        echo "  gh CLI not available. Skipping issue fetch."
+        echo "No issues available (gh CLI not installed)." > "$ISSUES_FILE"
+    elif [ -z "$PYTHON" ]; then
+        echo "  Python not available. Skipping issue formatting."
+        echo "No issues available (Python not found)." > "$ISSUES_FILE"
+    else
         gh issue list --repo "$REPO" \
             --state open \
             --label "agent-input" \
@@ -134,15 +158,12 @@ $CI_LOGS"
             > /tmp/issues_raw.json 2>/dev/null || true
 
         FORMAT_STDERR=$(mktemp)
-        python3 scripts/format_issues.py /tmp/issues_raw.json "$SPONSORS_FILE" "$DAY" > "$ISSUES_FILE" 2>"$FORMAT_STDERR" || echo "No issues found." > "$ISSUES_FILE"
+        $PYTHON scripts/format_issues.py /tmp/issues_raw.json "$SPONSORS_FILE" "$DAY" > "$ISSUES_FILE" 2>"$FORMAT_STDERR" || echo "No issues found." > "$ISSUES_FILE"
         if [ -s "$FORMAT_STDERR" ]; then
             cat "$FORMAT_STDERR" | sed 's/^/    /' >&2
         fi
         rm -f "$FORMAT_STDERR"
         echo "  $(grep -c '^### Issue' "$ISSUES_FILE" 2>/dev/null || echo 0) issues loaded."
-    else
-        echo "  gh CLI not available. Skipping issue fetch."
-        echo "No issues available (gh CLI not installed)." > "$ISSUES_FILE"
     fi
     echo ""
 
@@ -155,7 +176,7 @@ $CI_LOGS"
             --author "yoyo-evolve[bot]" \
             --json number,title,body \
             --jq '.[] | "'"$BOUNDARY_BEGIN"'\n### Issue #\(.number)\n**Title:** \(.title)\n\(.body)\n'"$BOUNDARY_END"'\n"' 2>/dev/null \
-            | python3 -c "import sys,re; print(re.sub(r'<!--.*?-->','',sys.stdin.read(),flags=re.DOTALL))" 2>/dev/null || true)
+            | $PYTHON -c "import sys,re; print(re.sub(r'<!--.*?-->','',sys.stdin.read(),flags=re.DOTALL))" 2>/dev/null || true)
         if [ -n "$SELF_ISSUES" ]; then
             echo "  $(echo "$SELF_ISSUES" | grep -c '^### Issue') self-issues loaded."
         else
@@ -172,7 +193,7 @@ $CI_LOGS"
             --author "yoyo-evolve[bot]" \
             --json number,title,body,comments \
             --jq '.[] | "'"$BOUNDARY_BEGIN"'\n### Issue #\(.number)\n**Title:** \(.title)\n\(.body)\n\(if (.comments | length) > 0 then "⚠️ Human replied:\n" + (.comments | map(.body) | join("\n---\n")) else "No replies yet." end)\n'"$BOUNDARY_END"'\n"' 2>/dev/null \
-            | python3 -c "import sys,re; print(re.sub(r'<!--.*?-->','',sys.stdin.read(),flags=re.DOTALL))" 2>/dev/null || true)
+            | $PYTHON -c "import sys,re; print(re.sub(r'<!--.*?-->','',sys.stdin.read(),flags=re.DOTALL))" 2>/dev/null || true)
         if [ -n "$HELP_ISSUES" ]; then
             echo "  $(echo "$HELP_ISSUES" | grep -c '^### Issue') help-wanted issues loaded."
         else
@@ -191,7 +212,7 @@ $CI_LOGS"
             2>/dev/null || true)
 
         if [ -n "$REPLY_ISSUES" ]; then
-            PENDING_REPLIES=$(echo "$REPLY_ISSUES" | python3 -c "
+            PENDING_REPLIES=$(echo "$REPLY_ISSUES" | $PYTHON -c "
 import json, sys
 
 data = json.load(sys.stdin)
