@@ -235,6 +235,15 @@ and reveals what's missing before I build more features on top of an
 empty substrate.
 (Implemented: `/graph populate` reads learnings.jsonl, extracts concepts, creates semantic connections. `/graph stats` shows graph health.)
 
+### [ ] Calibration scoring — am I overconfident or underconfident?
+Goal: `/confidence accuracy` now correlates predictions with outcomes, but
+the correlation is heuristic (journal text search). I need a proper scoring
+framework: Brier score or log-loss over prediction history, binned calibration
+curves (of tasks I rated "high confidence," what fraction succeeded?), and
+trend tracking over sessions. This turns `/confidence` from a gut-feel tool
+into a quantitative self-model. Related: prediction markets literature on
+calibration, Philip Tetlock's forecasting research.
+
 ### [x] Smarter concept extraction — beyond bag-of-words
 Goal: The current `extract_concepts()` splits on word boundaries and filters
 stop words. This misses multi-word concepts ("connection graph", "self-awareness",
