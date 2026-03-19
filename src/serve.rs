@@ -14,8 +14,6 @@
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
-use tokio::sync::Mutex;
-use yoagent::agent::Agent;
 use yoagent::*;
 
 use crate::format::*;
@@ -49,8 +47,6 @@ pub async fn start_server(agent_config: AgentConfig, port: u16) {
     println!("{BOLD}    Base URL: http://{addr}/v1{RESET}");
     println!("{BOLD}    API Key:  any-string-works{RESET}\n");
 
-    let agent = agent_config.build_agent();
-    let agent = Arc::new(Mutex::new(agent));
     let config = Arc::new(agent_config);
 
     loop {
@@ -62,11 +58,10 @@ pub async fn start_server(agent_config: AgentConfig, port: u16) {
             }
         };
 
-        let agent = Arc::clone(&agent);
         let config = Arc::clone(&config);
 
         tokio::spawn(async move {
-            if let Err(e) = handle_connection(stream, agent, config, peer).await {
+            if let Err(e) = handle_connection(stream, config, peer).await {
                 eprintln!("{RED}  connection error: {e}{RESET}");
             }
         });
@@ -74,9 +69,10 @@ pub async fn start_server(agent_config: AgentConfig, port: u16) {
 }
 
 /// Handle a single HTTP connection.
+///
+/// Each chat/completion request creates a fresh agent for conversation isolation.
 async fn handle_connection(
     stream: tokio::net::TcpStream,
-    agent: Arc<Mutex<Agent>>,
     config: Arc<AgentConfig>,
     peer: std::net::SocketAddr,
 ) -> Result<(), String> {
@@ -240,12 +236,14 @@ async fn handle_connection(
             is_streaming
         );
 
+        // Create a fresh agent for this request (conversation isolation)
+        let mut agent = config.build_agent();
+
         if is_streaming {
-            return handle_streaming_chat(&mut writer, agent, config, &prompt, peer).await;
+            return handle_streaming_chat(&mut writer, &mut agent, config, &prompt, peer).await;
         }
 
         // Non-streaming: run full prompt and return
-        let mut agent = agent.lock().await;
         let mut usage = yoagent::Usage::default();
         let response_text = run_prompt(&mut agent, &prompt, &mut usage, &config.model).await;
 
@@ -314,7 +312,8 @@ async fn handle_connection(
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let mut agent = agent.lock().await;
+        // Create a fresh agent for this request (conversation isolation)
+        let mut agent = config.build_agent();
         let mut usage = yoagent::Usage::default();
         let response_text = run_prompt(&mut agent, &full_prompt, &mut usage, &config.model).await;
 
@@ -404,7 +403,7 @@ async fn handle_connection(
 /// Handle a streaming chat completion request via SSE.
 async fn handle_streaming_chat(
     writer: &mut (impl AsyncWriteExt + Unpin),
-    agent: Arc<Mutex<Agent>>,
+    agent: &mut Agent,
     config: Arc<AgentConfig>,
     prompt: &str,
     peer: std::net::SocketAddr,
@@ -447,7 +446,6 @@ async fn handle_streaming_chat(
     send_sse_data(writer, &role_chunk).await?;
 
     // Run through yoyo's agent with streaming
-    let mut agent = agent.lock().await;
     let mut rx = agent.prompt(prompt).await;
     let mut total_chars = 0u64;
 
