@@ -35,7 +35,9 @@
       "Read",
       "Glob",
       "Grep",
-      "Bash(*)"
+      "Bash(*)",
+      "WebFetch(domain:deepwiki.com)",
+      "WebSearch"
     ],
     "defaultMode": "bypassPermissions"
   }

@@ -13,3 +13,8 @@
 {"day": 19, "task_num": 3, "title": "`/runtime-errors` subcommands (clear, summary)", "outcome": "verified"}
 {"day": 19, "task_num": 4, "title": "Deduplicate runtime error messages before logging", "outcome": "verified"}
 {"day": 19, "task_num": 5, "title": "Wire runtime error patterns into evolution planning prompt", "outcome": "verified"}
+{"day": 19, "task_num": 1, "title": "Fix and verify enhanced /init implementation", "outcome": "verified"}
+{"day": 19, "task_num": 2, "title": "Add /health endpoint to serve mode", "outcome": "verified"}
+{"day": 19, "task_num": 3, "title": "Serve mode conversation isolation", "outcome": "verified"}
+{"day": 19, "task_num": 4, "title": "Wire /init to read actual file contents for external projects", "outcome": "verified"}
+{"day": 19, "task_num": 5, "title": "Improve runtime error handling for connection failures", "outcome": "verified"}

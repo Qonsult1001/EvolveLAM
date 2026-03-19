@@ -334,10 +334,16 @@ pub struct Config {
     pub dir_restrictions: DirectoryRestrictions,
     pub serve: bool,
     pub port: u16,
+    /// Project path override — sets the working directory for .yoyo/ state files.
+    /// When set, yoyo writes response.md, runtime_errors.jsonl, etc. relative to this path.
+    pub project_path: Option<String>,
 }
 
 /// Whether verbose output is enabled. Set once at startup.
 static VERBOSE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+/// Project path override for .yoyo/ state directory. Set once at startup.
+static PROJECT_PATH: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
 
 /// Enable verbose output.
 pub fn enable_verbose() {
@@ -347,6 +353,20 @@ pub fn enable_verbose() {
 /// Check if verbose output is enabled.
 pub fn is_verbose() -> bool {
     *VERBOSE.get_or_init(|| false)
+}
+
+/// Set the project path override.
+pub fn set_project_path(path: Option<String>) {
+    let _ = PROJECT_PATH.set(path);
+}
+
+/// Get the .yoyo directory path, respecting --project-path if set.
+/// Returns either `<project_path>/.yoyo` or just `.yoyo` (relative to CWD).
+pub fn yoyo_state_dir() -> std::path::PathBuf {
+    match PROJECT_PATH.get().and_then(|p| p.as_ref()) {
+        Some(base) => std::path::PathBuf::from(base).join(".yoyo"),
+        None => std::path::PathBuf::from(".yoyo"),
+    }
 }
 
 /// Project context file names, checked in order. YOYO.md is the canonical name;
@@ -376,6 +396,7 @@ pub fn print_help() {
     println!("  --api-key <key>   API key (overrides provider-specific env var)");
     println!("  --mcp <cmd>       Connect to an MCP server via stdio (repeatable)");
     println!("  --openapi <spec>  Load OpenAPI spec file and register API tools (repeatable)");
+    println!("  --project-path <d> Working directory for .yoyo/ state (response.md, etc.)");
     println!("  --no-color        Disable colored output (also respects NO_COLOR env)");
     println!("  --verbose, -v     Show debug info (API errors, request details)");
     println!("  --yes, -y         Auto-approve all tool executions (skip confirmation prompts)");
@@ -532,6 +553,7 @@ const KNOWN_FLAGS: &[&str] = &[
     "-V",
     "--serve",
     "--port",
+    "--project-path",
 ];
 
 /// Warn about any unrecognized flags in the arguments.
@@ -882,6 +904,7 @@ pub fn parse_args(args: &[String]) -> Option<Config> {
         "--allow-dir",
         "--deny-dir",
         "--port",
+        "--project-path",
     ];
     for flag in &flags_needing_values {
         if let Some(pos) = args.iter().position(|a| a == flag) {
@@ -1202,6 +1225,14 @@ pub fn parse_args(args: &[String]) -> Option<Config> {
         .filter_map(|(i, _)| args.get(i + 1).cloned())
         .collect();
 
+    // --project-path <dir>: override working directory for .yoyo/ state
+    let project_path = args
+        .iter()
+        .position(|a| a == "--project-path")
+        .and_then(|i| args.get(i + 1))
+        .cloned()
+        .or_else(|| file_config.get("project_path").cloned());
+
     Some(Config {
         model,
         api_key,
@@ -1224,6 +1255,7 @@ pub fn parse_args(args: &[String]) -> Option<Config> {
         dir_restrictions,
         serve,
         port,
+        project_path,
     })
 }
 

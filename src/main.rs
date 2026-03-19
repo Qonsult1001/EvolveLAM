@@ -885,6 +885,9 @@ async fn main() {
         enable_verbose();
     }
 
+    // Set project path for .yoyo/ state directory
+    cli::set_project_path(config.project_path);
+
     let continue_session = config.continue_session;
     let output_path = config.output_path;
     let mcp_servers = config.mcp_servers;
