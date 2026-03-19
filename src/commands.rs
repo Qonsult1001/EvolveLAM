@@ -63,6 +63,7 @@ pub const KNOWN_COMMANDS: &[&str] = &[
     "/provider",
     "/ast",
     "/coupling",
+    "/errors",
 ];
 
 /// Well-known model names for `/model <Tab>` completion.
@@ -532,9 +533,9 @@ pub use crate::commands_git::{
 
 // Project-related handlers
 pub use crate::commands_project::{
-    handle_ast, handle_context, handle_coupling, handle_docs, handle_find, handle_fix,
-    handle_health, handle_index, handle_init, handle_lint, handle_run, handle_run_usage,
-    handle_test, handle_tree,
+    handle_ast, handle_context, handle_coupling, handle_docs, handle_errors, handle_find,
+    handle_fix, handle_health, handle_index, handle_init, handle_lint, handle_run,
+    handle_run_usage, handle_test, handle_tree,
 };
 
 // Session-related handlers
@@ -893,12 +894,13 @@ mod tests {
         build_commands_for_project, build_fix_prompt, build_project_tree, classify_failure_oneline,
         classify_rust_error, detect_project_name, detect_project_type,
         extract_first_meaningful_line, find_files, fix_strategy, format_error_classification,
-        format_project_index, format_tree_from_paths, fuzzy_score, generate_init_content,
-        health_checks_for_project, highlight_match, is_binary_extension, lint_command_for_project,
-        parse_test_summary, run_health_check_for_project, run_health_checks_full_output,
+        format_errors_display, format_project_index, format_tree_from_paths, fuzzy_score,
+        generate_init_content, health_checks_for_project, highlight_match, is_binary_extension,
+        lint_command_for_project, parse_error_log, parse_test_summary,
+        run_health_check_for_project, run_health_checks_full_output,
         run_health_checks_with_classification, run_shell_command, scan_important_dirs,
-        scan_important_files, test_command_for_project, IndexEntry, ProjectType, RustErrorCategory,
-        TestSummary,
+        scan_important_files, summarize_error_log, test_command_for_project, ErrorLogEntry,
+        IndexEntry, ProjectType, RustErrorCategory, TestSummary,
     };
     use crate::commands_session::{parse_bookmark_name, parse_spawn_task, Bookmarks};
     use crate::memory::{
@@ -3563,5 +3565,112 @@ test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
     fn test_parse_test_summary_empty_input() {
         let summary = parse_test_summary("");
         assert!(summary.is_none());
+    }
+
+    // ── Error log tests ──────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_error_log_single_entry() {
+        let line = r#"{"ts":"2026-03-19T06:30:00Z","day":19,"categories":{"missing_import":3,"borrow_checker":1},"source":"fix"}"#;
+        let entries = parse_error_log(line);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].ts, "2026-03-19T06:30:00Z");
+        assert_eq!(entries[0].day, 19);
+        assert_eq!(entries[0].source, "fix");
+        assert_eq!(entries[0].categories.len(), 2);
+        assert_eq!(entries[0].categories[0], ("missing_import".to_string(), 3));
+        assert_eq!(entries[0].categories[1], ("borrow_checker".to_string(), 1));
+    }
+
+    #[test]
+    fn test_parse_error_log_multiple_entries() {
+        let content = r#"{"ts":"2026-03-18T12:00:00Z","day":18,"categories":{"type_mismatch":2},"source":"fix"}
+{"ts":"2026-03-19T06:30:00Z","day":19,"categories":{"unused":5,"clippy":1},"source":"fix"}"#;
+        let entries = parse_error_log(content);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].day, 18);
+        assert_eq!(entries[1].day, 19);
+    }
+
+    #[test]
+    fn test_parse_error_log_empty_and_blank_lines() {
+        let content = "\n\n  \n";
+        let entries = parse_error_log(content);
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn test_summarize_error_log_aggregates() {
+        let entries = vec![
+            ErrorLogEntry {
+                ts: "2026-03-18T12:00:00Z".to_string(),
+                day: 18,
+                categories: vec![
+                    ("missing_import".to_string(), 3),
+                    ("borrow_checker".to_string(), 1),
+                ],
+                source: "fix".to_string(),
+            },
+            ErrorLogEntry {
+                ts: "2026-03-19T06:00:00Z".to_string(),
+                day: 19,
+                categories: vec![
+                    ("missing_import".to_string(), 2),
+                    ("type_mismatch".to_string(), 4),
+                ],
+                source: "fix".to_string(),
+            },
+        ];
+        let totals = summarize_error_log(&entries);
+        assert_eq!(totals[0].0, "missing_import");
+        assert_eq!(totals[0].1, 5);
+        assert_eq!(totals[1].0, "type_mismatch");
+        assert_eq!(totals[1].1, 4);
+        assert_eq!(totals[2].0, "borrow_checker");
+        assert_eq!(totals[2].1, 1);
+    }
+
+    #[test]
+    fn test_format_errors_display_empty() {
+        let display = format_errors_display(&[]);
+        assert!(display.contains("No error log entries"));
+    }
+
+    #[test]
+    fn test_format_errors_display_shows_all_sections() {
+        let entries = vec![
+            ErrorLogEntry {
+                ts: "2026-03-18T12:00:00Z".to_string(),
+                day: 18,
+                categories: vec![("missing_import".to_string(), 3)],
+                source: "fix".to_string(),
+            },
+            ErrorLogEntry {
+                ts: "2026-03-19T06:00:00Z".to_string(),
+                day: 19,
+                categories: vec![
+                    ("borrow_checker".to_string(), 2),
+                    ("missing_import".to_string(), 1),
+                ],
+                source: "fix".to_string(),
+            },
+        ];
+        let display = format_errors_display(&entries);
+        assert!(display.contains("Error totals"));
+        assert!(display.contains("missing_import: 4"));
+        assert!(display.contains("borrow_checker: 2"));
+        assert!(display.contains("Most common: missing_import"));
+        assert!(display.contains("Recent events"));
+        assert!(display.contains("2026-03-19T06:00:00Z"));
+        assert!(display.contains("2026-03-18T12:00:00Z"));
+    }
+
+    #[test]
+    fn test_parse_error_log_malformed_line_skipped() {
+        let content = r#"not valid json
+{"ts":"2026-03-19T06:30:00Z","day":19,"categories":{"unused":1},"source":"fix"}"#;
+        let entries = parse_error_log(content);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].categories[0].0, "unused");
     }
 }

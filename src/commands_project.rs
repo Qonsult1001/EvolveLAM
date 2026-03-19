@@ -872,6 +872,22 @@ pub async fn handle_fix(
         println!("\n{DIM}  Error analysis:{RESET}");
         print!("{DIM}{classification}{RESET}");
     }
+    // Log error frequency to .yoyo/error_log.jsonl
+    let all_categories = {
+        let mut merged: std::collections::HashMap<RustErrorCategory, usize> =
+            std::collections::HashMap::new();
+        for (_, error_output) in &failures {
+            for (cat, count) in classify_rust_error(error_output) {
+                *merged.entry(cat).or_insert(0) += count;
+            }
+        }
+        let mut v: Vec<(RustErrorCategory, usize)> = merged.into_iter().collect();
+        v.sort_by(|a, b| b.1.cmp(&a.1));
+        v
+    };
+    if !all_categories.is_empty() {
+        append_error_log(&all_categories, "fix");
+    }
     println!("\n{YELLOW}  Sending {fail_count} failure(s) to AI for fixing...{RESET}\n");
     let fix_prompt = build_fix_prompt(&failures);
     run_prompt(agent, &fix_prompt, session_total, model).await;
@@ -1617,6 +1633,215 @@ pub fn handle_ast(input: &str) {
     let symbols = ast::search_symbols(pattern);
     let formatted = ast::format_symbols(&symbols, 30);
     println!("{DIM}{formatted}{RESET}\n");
+}
+
+/// Convert days since Unix epoch to (year, month, day).
+/// Algorithm from Howard Hinnant's chrono-compatible date library.
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let z = days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u32;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d)
+}
+
+// ── Error frequency logging ──────────────────────────────────────────────
+
+/// A single error log entry from `.yoyo/error_log.jsonl`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ErrorLogEntry {
+    pub ts: String,
+    pub day: u32,
+    pub categories: Vec<(String, usize)>,
+    pub source: String,
+}
+
+/// Append an error frequency record to `.yoyo/error_log.jsonl`.
+pub fn append_error_log(categories: &[(RustErrorCategory, usize)], source: &str) {
+    if categories.is_empty() {
+        return;
+    }
+    let yoyo_dir = std::path::Path::new(".yoyo");
+    if !yoyo_dir.exists() {
+        let _ = std::fs::create_dir_all(yoyo_dir);
+    }
+    let day = std::fs::read_to_string("DAY_COUNT")
+        .ok()
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .unwrap_or(0);
+    let ts = {
+        use std::time::SystemTime;
+        let dur = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default();
+        let secs = dur.as_secs();
+        let days_since_epoch = secs / 86400;
+        let time_of_day = secs % 86400;
+        let hours = time_of_day / 3600;
+        let minutes = (time_of_day % 3600) / 60;
+        let seconds = time_of_day % 60;
+        let (y, m, d) = civil_from_days(days_since_epoch as i64);
+        format!(
+            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+            y, m, d, hours, minutes, seconds
+        )
+    };
+    let cat_entries: Vec<String> = categories
+        .iter()
+        .map(|(cat, count)| format!("\"{}\":{}", cat, count))
+        .collect();
+    let line = format!(
+        "{{\"ts\":\"{}\",\"day\":{},\"categories\":{{{}}},\"source\":\"{}\"}}",
+        ts,
+        day,
+        cat_entries.join(","),
+        source
+    );
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(".yoyo/error_log.jsonl")
+    {
+        let _ = writeln!(f, "{}", line);
+    }
+}
+
+/// Parse error log entries from JSONL content.
+pub fn parse_error_log(content: &str) -> Vec<ErrorLogEntry> {
+    let mut entries = Vec::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(entry) = parse_error_log_line(line) {
+            entries.push(entry);
+        }
+    }
+    entries
+}
+
+/// Parse a single JSONL line into an ErrorLogEntry.
+fn parse_error_log_line(line: &str) -> Option<ErrorLogEntry> {
+    let ts = extract_json_string(line, "ts")?;
+    let day = extract_json_number(line, "day")?;
+    let source = extract_json_string(line, "source")?;
+    let categories = extract_json_categories(line)?;
+    Some(ErrorLogEntry {
+        ts,
+        day,
+        categories,
+        source,
+    })
+}
+
+/// Extract a string field from a JSON line: `"key":"value"`.
+fn extract_json_string(json: &str, key: &str) -> Option<String> {
+    let pattern = format!("\"{}\":\"", key);
+    let start = json.find(&pattern)? + pattern.len();
+    let rest = &json[start..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
+}
+
+/// Extract an integer field from a JSON line: `"key":123`.
+fn extract_json_number(json: &str, key: &str) -> Option<u32> {
+    let pattern = format!("\"{}\":", key);
+    let start = json.find(&pattern)? + pattern.len();
+    let rest = &json[start..];
+    let num_str: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    num_str.parse().ok()
+}
+
+/// Extract the categories object from a JSON line.
+fn extract_json_categories(json: &str) -> Option<Vec<(String, usize)>> {
+    let pattern = "\"categories\":{";
+    let start = json.find(pattern)? + pattern.len();
+    let rest = &json[start..];
+    let end = rest.find('}')?;
+    let inner = &rest[..end];
+    if inner.is_empty() {
+        return Some(Vec::new());
+    }
+    let mut cats = Vec::new();
+    for pair in inner.split(',') {
+        let pair = pair.trim();
+        let mut parts = pair.splitn(2, ':');
+        let key = parts.next()?.trim().trim_matches('"');
+        let val: usize = parts.next()?.trim().parse().ok()?;
+        cats.push((key.to_string(), val));
+    }
+    Some(cats)
+}
+
+/// Aggregate error log entries into category totals.
+pub fn summarize_error_log(entries: &[ErrorLogEntry]) -> Vec<(String, usize)> {
+    let mut totals: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for entry in entries {
+        for (cat, count) in &entry.categories {
+            *totals.entry(cat.clone()).or_insert(0) += count;
+        }
+    }
+    let mut result: Vec<(String, usize)> = totals.into_iter().collect();
+    result.sort_by(|a, b| b.1.cmp(&a.1));
+    result
+}
+
+/// Format the /errors display output.
+pub fn format_errors_display(entries: &[ErrorLogEntry]) -> String {
+    if entries.is_empty() {
+        return "  No error log entries found.\n  Errors are recorded when /fix classifies build failures.\n"
+            .to_string();
+    }
+    let mut out = String::new();
+    let totals = summarize_error_log(entries);
+    let grand_total: usize = totals.iter().map(|(_, c)| c).sum();
+
+    out.push_str(&format!(
+        "  Error totals ({} events, {} errors):\n",
+        entries.len(),
+        grand_total
+    ));
+    for (cat, count) in &totals {
+        out.push_str(&format!("    {}: {}\n", cat, count));
+    }
+
+    if let Some((top_cat, top_count)) = totals.first() {
+        out.push_str(&format!("\n  Most common: {} ({})\n", top_cat, top_count));
+    }
+
+    out.push_str("\n  Recent events:\n");
+    let recent: Vec<&ErrorLogEntry> = entries.iter().rev().take(5).collect();
+    for entry in recent {
+        let cats: Vec<String> = entry
+            .categories
+            .iter()
+            .map(|(c, n)| format!("{} {}", n, c))
+            .collect();
+        out.push_str(&format!(
+            "    [{}] day {} — {}\n",
+            entry.ts,
+            entry.day,
+            cats.join(", ")
+        ));
+    }
+    out
+}
+
+/// Handle the /errors command.
+pub fn handle_errors() {
+    let path = std::path::Path::new(".yoyo/error_log.jsonl");
+    let content = std::fs::read_to_string(path).unwrap_or_default();
+    let entries = parse_error_log(&content);
+    let display = format_errors_display(&entries);
+    println!("{DIM}{display}{RESET}\n");
 }
 
 // ── /coupling ───────────────────────────────────────────────────────────
