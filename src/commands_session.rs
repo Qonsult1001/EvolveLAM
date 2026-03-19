@@ -408,14 +408,36 @@ pub fn parse_journal_stats(content: &str) -> JournalStats {
         total_sessions: 0,
         sessions_by_day: Vec::new(),
         total_tests_mentioned: 0,
+        test_counts_by_session: Vec::new(),
+        revert_sessions: 0,
+        task_sessions: 0,
     };
 
     let mut current_day: Option<u32> = None;
     let mut day_sessions: u32 = 0;
+    let mut session_has_revert = false;
+    let mut session_has_task = false;
+    let mut session_test_count: Option<u32> = None;
 
     for line in content.lines() {
         // Match "## Day N" headers
         if let Some(rest) = line.strip_prefix("## Day ") {
+            // Flush previous session data
+            if current_day.is_some() {
+                if session_has_revert {
+                    stats.revert_sessions += 1;
+                }
+                if session_has_task {
+                    stats.task_sessions += 1;
+                }
+                if let (Some(day), Some(tc)) = (current_day, session_test_count) {
+                    stats.test_counts_by_session.push((day, tc));
+                }
+            }
+            session_has_revert = false;
+            session_has_task = false;
+            session_test_count = None;
+
             if let Some(day_num) = rest
                 .split(|c: char| !c.is_ascii_digit())
                 .next()
@@ -432,10 +454,24 @@ pub fn parse_journal_stats(content: &str) -> JournalStats {
                 day_sessions += 1;
             }
         }
+
+        let lower = line.to_lowercase();
+
+        // Track reverts and tasks (exclude "zero reverts", "no reverts", "0 reverts")
+        if lower.contains("revert")
+            && !lower.contains("zero revert")
+            && !lower.contains("no revert")
+            && !lower.contains("0 revert")
+        {
+            session_has_revert = true;
+        }
+        if lower.contains("task") {
+            session_has_task = true;
+        }
+
         // Count test mentions like "N unit tests" or "N tests"
         if let Some(idx) = line.find(" unit test") {
             let before = &line[..idx];
-            // Extract the last number before " unit test"
             let num_str: String = before
                 .chars()
                 .rev()
@@ -446,7 +482,20 @@ pub fn parse_journal_stats(content: &str) -> JournalStats {
                 .collect();
             if let Ok(num) = num_str.parse::<u32>() {
                 stats.total_tests_mentioned = stats.total_tests_mentioned.max(num);
+                session_test_count = Some(num);
             }
+        }
+    }
+    // Flush last session
+    if current_day.is_some() {
+        if session_has_revert {
+            stats.revert_sessions += 1;
+        }
+        if session_has_task {
+            stats.task_sessions += 1;
+        }
+        if let (Some(day), Some(tc)) = (current_day, session_test_count) {
+            stats.test_counts_by_session.push((day, tc));
         }
     }
     // Push the last day
@@ -459,12 +508,46 @@ pub fn parse_journal_stats(content: &str) -> JournalStats {
     stats
 }
 
+/// Compute a simple linear trend from a sequence of values.
+/// Returns (slope, direction_label). Positive slope = improving, negative = declining.
+pub fn compute_trend(values: &[f64]) -> (f64, &'static str) {
+    if values.len() < 2 {
+        return (0.0, "insufficient data");
+    }
+    let n = values.len() as f64;
+    let sum_x: f64 = (0..values.len()).map(|i| i as f64).sum();
+    let sum_y: f64 = values.iter().sum();
+    let sum_xy: f64 = values.iter().enumerate().map(|(i, y)| i as f64 * y).sum();
+    let sum_x2: f64 = (0..values.len()).map(|i| (i as f64) * (i as f64)).sum();
+
+    let denom = n * sum_x2 - sum_x * sum_x;
+    if denom.abs() < f64::EPSILON {
+        return (0.0, "flat");
+    }
+    let slope = (n * sum_xy - sum_x * sum_y) / denom;
+
+    let label = if slope > 0.5 {
+        "improving"
+    } else if slope < -0.5 {
+        "declining"
+    } else {
+        "stable"
+    };
+    (slope, label)
+}
+
 /// Stats extracted from JOURNAL.md.
 #[derive(Debug, Clone, PartialEq)]
 pub struct JournalStats {
     pub total_sessions: u32,
     pub sessions_by_day: Vec<(u32, u32)>,
     pub total_tests_mentioned: u32,
+    /// Test counts extracted per session: (day, test_count).
+    pub test_counts_by_session: Vec<(u32, u32)>,
+    /// Count of sessions that mention "revert" (case-insensitive).
+    pub revert_sessions: u32,
+    /// Count of sessions that mention "task" (rough measure of tasks attempted).
+    pub task_sessions: u32,
 }
 
 /// Format the /stats display output.
@@ -497,6 +580,65 @@ pub fn format_stats_display(journal_stats: &JournalStats, error_content: &str) -
             "    Peak test count: {}\n",
             journal_stats.total_tests_mentioned
         ));
+    }
+
+    // Convergence metrics
+    if journal_stats.total_sessions > 1 {
+        out.push_str("\n  Convergence:\n");
+
+        // Revert rate
+        let revert_rate = if journal_stats.total_sessions > 0 {
+            journal_stats.revert_sessions as f64 / journal_stats.total_sessions as f64 * 100.0
+        } else {
+            0.0
+        };
+        out.push_str(&format!(
+            "    Revert rate: {}/{} sessions ({:.0}%)\n",
+            journal_stats.revert_sessions, journal_stats.total_sessions, revert_rate
+        ));
+
+        // Test count trend
+        if journal_stats.test_counts_by_session.len() >= 2 {
+            let test_values: Vec<f64> = journal_stats
+                .test_counts_by_session
+                .iter()
+                .map(|(_, tc)| *tc as f64)
+                .collect();
+            let (slope, label) = compute_trend(&test_values);
+            out.push_str(&format!(
+                "    Test growth: {} ({:+.1} tests/session)\n",
+                label, slope
+            ));
+        }
+
+        // Sessions per day trend
+        if journal_stats.sessions_by_day.len() >= 2 {
+            let day_values: Vec<f64> = journal_stats
+                .sessions_by_day
+                .iter()
+                .map(|(_, count)| *count as f64)
+                .collect();
+            let (_, label) = compute_trend(&day_values);
+            out.push_str(&format!("    Activity trend: {}\n", label));
+        }
+
+        // Overall convergence score (simple heuristic)
+        let test_growing = journal_stats.test_counts_by_session.len() >= 2 && {
+            let vals: Vec<f64> = journal_stats
+                .test_counts_by_session
+                .iter()
+                .map(|(_, tc)| *tc as f64)
+                .collect();
+            compute_trend(&vals).0 > 0.0
+        };
+        let low_revert = revert_rate < 30.0;
+        let score = (if test_growing { 1 } else { 0 }) + (if low_revert { 1 } else { 0 });
+        let verdict = match score {
+            2 => "converging",
+            1 => "mixed signals",
+            _ => "needs attention",
+        };
+        out.push_str(&format!("    Verdict: {}\n", verdict));
     }
 
     // Error stats
@@ -675,6 +817,9 @@ mod tests {
             total_sessions: 5,
             sessions_by_day: vec![(18, 2), (19, 3)],
             total_tests_mentioned: 700,
+            test_counts_by_session: vec![(18, 600), (18, 650), (19, 680), (19, 700)],
+            revert_sessions: 1,
+            task_sessions: 4,
         };
         let display = format_stats_display(&stats, "");
         assert!(display.contains("Total sessions: 5"));
@@ -682,6 +827,9 @@ mod tests {
         assert!(display.contains("Avg sessions/day: 2.5"));
         assert!(display.contains("Most productive: Day 19 (3 sessions)"));
         assert!(display.contains("Peak test count: 700"));
+        assert!(display.contains("Convergence:"));
+        assert!(display.contains("Revert rate:"));
+        assert!(display.contains("Test growth:"));
     }
 
     #[test]
@@ -690,11 +838,77 @@ mod tests {
             total_sessions: 1,
             sessions_by_day: vec![(19, 1)],
             total_tests_mentioned: 0,
+            test_counts_by_session: Vec::new(),
+            revert_sessions: 0,
+            task_sessions: 0,
         };
         let error_content = r#"{"ts":"2026-03-19T06:30:00Z","day":19,"categories":{"missing_import":3},"source":"fix","resolved":"true"}"#;
         let display = format_stats_display(&stats, error_content);
         assert!(display.contains("Error Recovery"));
         assert!(display.contains("Total errors logged: 3"));
         assert!(display.contains("Resolved: 1"));
+    }
+
+    #[test]
+    fn test_compute_trend_improving() {
+        let values = vec![100.0, 200.0, 300.0, 400.0];
+        let (slope, label) = compute_trend(&values);
+        assert!(slope > 0.0);
+        assert_eq!(label, "improving");
+    }
+
+    #[test]
+    fn test_compute_trend_declining() {
+        let values = vec![400.0, 300.0, 200.0, 100.0];
+        let (slope, label) = compute_trend(&values);
+        assert!(slope < 0.0);
+        assert_eq!(label, "declining");
+    }
+
+    #[test]
+    fn test_compute_trend_stable() {
+        let values = vec![100.0, 100.0, 100.0, 100.0];
+        let (slope, label) = compute_trend(&values);
+        assert!(slope.abs() < 0.01);
+        assert_eq!(label, "stable");
+    }
+
+    #[test]
+    fn test_compute_trend_insufficient_data() {
+        let values = vec![100.0];
+        let (_, label) = compute_trend(&values);
+        assert_eq!(label, "insufficient data");
+    }
+
+    #[test]
+    fn test_parse_journal_stats_tracks_reverts() {
+        let journal = "## Day 10 — 06:00 — session one\nFive tasks, zero reverts.\n\n## Day 10 — 12:00 — session two\nTask 1 was reverted due to build failure.\n";
+        let stats = parse_journal_stats(journal);
+        assert_eq!(stats.total_sessions, 2);
+        assert_eq!(stats.revert_sessions, 1); // only second mentions "revert"
+    }
+
+    #[test]
+    fn test_parse_journal_stats_tracks_test_counts() {
+        let journal = "## Day 18 — 12:00 — session\n694 unit tests, 67 integration tests.\n\n## Day 19 — 08:00 — session\n739 unit tests + 67 integration tests.\n";
+        let stats = parse_journal_stats(journal);
+        assert_eq!(stats.test_counts_by_session.len(), 2);
+        assert_eq!(stats.test_counts_by_session[0], (18, 694));
+        assert_eq!(stats.test_counts_by_session[1], (19, 739));
+        assert_eq!(stats.total_tests_mentioned, 739);
+    }
+
+    #[test]
+    fn test_convergence_verdict_converging() {
+        let stats = JournalStats {
+            total_sessions: 10,
+            sessions_by_day: vec![(15, 2), (16, 3), (17, 2), (18, 3)],
+            total_tests_mentioned: 739,
+            test_counts_by_session: vec![(15, 500), (16, 550), (17, 600), (18, 700)],
+            revert_sessions: 1,
+            task_sessions: 8,
+        };
+        let display = format_stats_display(&stats, "");
+        assert!(display.contains("converging"));
     }
 }
