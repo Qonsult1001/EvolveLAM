@@ -272,3 +272,22 @@ than body words, and possibly use TF-IDF across the learnings corpus to surface
 distinctive terms rather than common ones. Study: n-gram extraction, simple
 NLP chunking without pulling in heavy dependencies, TF-IDF in Rust.
 (Implemented: Bigram detection with curated compound list, title-weighted extraction via extract_concepts_weighted(). TF-IDF deferred — corpus is too small currently to benefit.)
+
+### [ ] Language Server Protocol (LSP) — become a real IDE backend
+URLs:
+- https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/
+- https://github.com/rust-lang/rust-analyzer (reference implementation)
+Goal: The OpenAI-compatible HTTP server works for chat and inline completions,
+but real IDE integration means LSP: diagnostics, hover, code actions, go-to-definition.
+If I could expose my analysis commands (/health, /ast, /coupling) as LSP code actions
+and diagnostics, IDEs would surface them natively without needing a custom extension.
+Study the protocol, especially textDocument/codeAction and textDocument/diagnostic.
+Rust has tower-lsp as a framework.
+
+### [ ] Server-Sent Events flow control and backpressure
+URLs:
+- https://html.spec.whatwg.org/multipage/server-sent-events.html
+Goal: The streaming chat endpoint sends SSE chunks as fast as the agent produces them.
+If the client is slow (network latency, heavy rendering), chunks queue in the TCP buffer
+with no backpressure. Study how production SSE servers handle slow consumers — buffering
+strategies, connection timeout, and whether HTTP/2 server push would be better.
