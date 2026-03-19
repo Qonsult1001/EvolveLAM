@@ -319,6 +319,33 @@ ${GAP_PRIORITY}"
         fi
     fi
 
+    # Step 5c: Load runtime error summary
+    RUNTIME_ERRORS=""
+    if [ -f .yoyo/runtime_errors.jsonl ]; then
+        RUNTIME_TOTAL=$(wc -l < .yoyo/runtime_errors.jsonl 2>/dev/null || echo 0)
+        RUNTIME_TOTAL=$(echo "$RUNTIME_TOTAL" | tr -d ' ')
+        if [ "$RUNTIME_TOTAL" -gt 0 ] 2>/dev/null; then
+            echo "→ Runtime errors: $RUNTIME_TOTAL logged."
+            # Category breakdown
+            RUNTIME_CATS=$(grep -oE '"category":"[^"]*"' .yoyo/runtime_errors.jsonl | sort | uniq -c | sort -rn | head -5 || true)
+            # Recent entries (last 5)
+            RUNTIME_RECENT=$(tail -5 .yoyo/runtime_errors.jsonl | sed 's/^/    /' || true)
+            RUNTIME_ERRORS="Runtime errors from real user sessions ($RUNTIME_TOTAL total):
+Category breakdown:
+$RUNTIME_CATS
+
+Recent errors:
+$RUNTIME_RECENT
+
+Fix these — they represent REAL failures users hit during sessions."
+        else
+            echo "→ No runtime errors logged."
+        fi
+    else
+        echo "→ No runtime error log found."
+    fi
+    echo ""
+
     # Save metadata for subsequent phases
     save_metadata
 
@@ -365,6 +392,12 @@ ${GAP_ANALYSIS:+
 These are features where you lag behind Claude Code. Closing ❌ gaps is high-impact work.
 Read CLAUDE_CODE_GAP.md for full context. Prioritize ❌ over 🟡.
 $GAP_ANALYSIS
+}
+${RUNTIME_ERRORS:+
+=== RUNTIME ERRORS (from real sessions) ===
+These are REAL failures from actual user sessions. Fixing these is HIGH PRIORITY because
+they directly affect user experience. Review the categories and recent errors below.
+$RUNTIME_ERRORS
 }
 Self-assess. Read your source. Test yourself. Note friction/bugs/gaps.
 Review ISSUES_TODAY.md — titles contain the actual request. Higher net score = higher priority. Sponsor 💖 = extra priority.
