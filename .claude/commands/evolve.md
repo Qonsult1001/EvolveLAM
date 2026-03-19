@@ -19,13 +19,17 @@ Read and understand your current state:
 - Read ALL files under `src/` (your source code)
 - Read `JOURNAL.md` (last 5 entries)
 - Read `ISSUES_TODAY.md` (fetched in Step 1)
+- Read `RESEARCH.md` (research backlog — topics to study)
 - Read `memory/active_learnings.md` if it exists
+- Read `skills/plan/SKILL.md` (planning framework)
 
 Note friction, bugs, gaps, and opportunities.
 
 ## Step 3: Create the Session Plan
 
 Read `.evolve/plan_prompt.md` — it contains your identity, learnings, issues, and planning instructions.
+
+Follow the `plan` skill's prioritization framework: score each potential task on Impact and Urgency. Be ambitious — plan up to 5 meaningful tasks that close real capability gaps, not just trivial fixes. Each task should move the needle toward "could a real developer use me for real work?"
 
 Act on it: create `SESSION_PLAN.md` with tasks and issue responses.
 
