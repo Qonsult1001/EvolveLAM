@@ -894,27 +894,132 @@ const STOP_WORDS: &[&str] = &[
 ///
 /// Splits on non-alphanumeric boundaries, lowercases, filters stop words,
 /// discards short tokens (<3 chars) and pure numbers, then deduplicates.
+/// Also detects common bigrams (two-word compound concepts).
+#[cfg(test)]
 pub fn extract_concepts(text: &str) -> Vec<String> {
-    let mut seen = std::collections::HashSet::new();
-    let mut concepts = Vec::new();
+    extract_concepts_inner(text, text)
+}
 
-    for word in text.split(|c: char| !c.is_alphanumeric() && c != '_') {
-        let w = word.to_lowercase();
-        if w.len() < 3 {
-            continue;
-        }
-        if w.chars().all(|c| c.is_ascii_digit()) {
-            continue;
-        }
-        if STOP_WORDS.contains(&w.as_str()) {
-            continue;
-        }
-        let normalized = w.replace(' ', "_");
-        if seen.insert(normalized.clone()) {
-            concepts.push(normalized);
+/// Extract concepts with title weighting — title concepts are included first
+/// and body concepts are appended. Bigrams from both are detected.
+pub fn extract_concepts_weighted(title: &str, body: &str) -> Vec<String> {
+    let combined = format!("{} {}", title, body);
+    let mut result = extract_concepts_inner(title, &combined);
+    let body_concepts = extract_concepts_inner(body, &combined);
+    let seen: std::collections::HashSet<String> = result.iter().cloned().collect();
+    for c in body_concepts {
+        if !seen.contains(&c) {
+            result.push(c);
         }
     }
+    result
+}
+
+/// Filter a word: returns Some(lowercased) if it's a valid concept word.
+fn filter_word(word: &str) -> Option<String> {
+    let w = word.to_lowercase();
+    if w.len() < 3 {
+        return None;
+    }
+    if w.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    if STOP_WORDS.contains(&w.as_str()) {
+        return None;
+    }
+    Some(w)
+}
+
+/// Internal: extract concepts with bigram detection.
+/// `text` is the text to extract from, `corpus` is used for bigram frequency.
+fn extract_concepts_inner(text: &str, corpus: &str) -> Vec<String> {
+    // First pass: extract all valid words in order
+    let words: Vec<String> = text
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .filter_map(filter_word)
+        .collect();
+
+    // Build bigram candidates from the corpus
+    let corpus_words: Vec<String> = corpus
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .filter_map(filter_word)
+        .collect();
+
+    let mut bigram_set = std::collections::HashSet::new();
+    for pair in corpus_words.windows(2) {
+        let bigram = format!("{}_{}", pair[0], pair[1]);
+        // Only keep bigrams where both words are meaningful (not numbers, not stop words)
+        // and the bigram itself is a recognizable compound concept
+        if is_compound_concept(&pair[0], &pair[1]) {
+            bigram_set.insert(bigram);
+        }
+    }
+
+    // Second pass: greedily match bigrams, falling back to unigrams
+    let mut seen = std::collections::HashSet::new();
+    let mut concepts = Vec::new();
+    let mut i = 0;
+    while i < words.len() {
+        if i + 1 < words.len() {
+            let bigram = format!("{}_{}", words[i], words[i + 1]);
+            if bigram_set.contains(&bigram) {
+                if seen.insert(bigram.clone()) {
+                    concepts.push(bigram);
+                }
+                i += 2;
+                continue;
+            }
+        }
+        let w = &words[i];
+        if seen.insert(w.clone()) {
+            concepts.push(w.clone());
+        }
+        i += 1;
+    }
     concepts
+}
+
+/// Known compound concept patterns — bigrams that should be kept together.
+/// These are domain-specific terms common in coding agent / PL contexts.
+fn is_compound_concept(a: &str, b: &str) -> bool {
+    // Known compound patterns
+    const KNOWN_COMPOUNDS: &[(&str, &str)] = &[
+        ("connection", "graph"),
+        ("error", "handling"),
+        ("error", "recovery"),
+        ("self", "awareness"),
+        ("self", "improvement"),
+        ("self", "modification"),
+        ("self", "assessment"),
+        ("latent", "space"),
+        ("dead", "code"),
+        ("tab", "completion"),
+        ("file", "coupling"),
+        ("type", "mismatch"),
+        ("borrow", "checker"),
+        ("missing", "import"),
+        ("test", "failure"),
+        ("git", "workflow"),
+        ("code", "review"),
+        ("pull", "request"),
+        ("build", "failure"),
+        ("fix", "strategy"),
+        ("session", "plan"),
+        ("research", "backlog"),
+        ("memory", "system"),
+        ("concept", "extraction"),
+        ("label", "propagation"),
+        ("graph", "search"),
+        ("causal", "inference"),
+        ("temporal", "decay"),
+        ("knowledge", "gap"),
+        ("permission", "prompts"),
+        ("meta", "work"),
+        ("commit", "message"),
+        ("unit", "test"),
+        ("integration", "test"),
+    ];
+    KNOWN_COMPOUNDS.contains(&(a, b))
 }
 
 /// Load learnings from the JSONL file.
@@ -945,16 +1050,7 @@ impl ConnectionGraph {
         let mut connections_created = 0;
 
         for learning in learnings {
-            let title_concepts = extract_concepts(&learning.title);
-            let takeaway_concepts = extract_concepts(&learning.takeaway);
-
-            let mut all_concepts: Vec<String> = Vec::new();
-            let mut seen = std::collections::HashSet::new();
-            for c in title_concepts.iter().chain(takeaway_concepts.iter()) {
-                if seen.insert(c.clone()) {
-                    all_concepts.push(c.clone());
-                }
-            }
+            let all_concepts = extract_concepts_weighted(&learning.title, &learning.takeaway);
 
             // Normalize direction alphabetically so repeated co-occurrences
             // always strengthen the same edge.
@@ -1882,6 +1978,34 @@ mod tests {
     fn test_extract_concepts_empty_input() {
         let concepts = extract_concepts("");
         assert!(concepts.is_empty());
+    }
+
+    #[test]
+    fn test_extract_concepts_detects_bigrams() {
+        let concepts = extract_concepts("the connection graph has error handling");
+        assert!(concepts.contains(&"connection_graph".to_string()));
+        assert!(concepts.contains(&"error_handling".to_string()));
+        // The individual words should NOT appear if consumed by a bigram
+        assert!(!concepts.contains(&"connection".to_string()));
+        assert!(!concepts.contains(&"graph".to_string()));
+    }
+
+    #[test]
+    fn test_extract_concepts_weighted_title_first() {
+        let concepts =
+            extract_concepts_weighted("self awareness", "error handling is important for recovery");
+        // Title concepts should appear first
+        assert_eq!(concepts[0], "self_awareness");
+        // Body concepts after
+        assert!(concepts.contains(&"error_handling".to_string()));
+        assert!(concepts.contains(&"recovery".to_string()));
+    }
+
+    #[test]
+    fn test_extract_concepts_weighted_no_duplicates() {
+        let concepts = extract_concepts_weighted("error handling", "error handling is key");
+        let eh_count = concepts.iter().filter(|c| *c == "error_handling").count();
+        assert_eq!(eh_count, 1);
     }
 
     // ── Populate from learnings tests ───────────────────────────────────
