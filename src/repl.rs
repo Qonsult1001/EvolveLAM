@@ -529,19 +529,19 @@ pub async fn run_repl(
                 continue;
             }
             s if s == "/remember" || s.starts_with("/remember ") => {
-                commands::handle_remember(input);
+                crate::commands_memory::handle_remember(input);
                 continue;
             }
             "/memories" => {
-                commands::handle_memories();
+                crate::commands_memory::handle_memories();
                 continue;
             }
             s if s == "/graph" || s.starts_with("/graph ") => {
-                commands::handle_graph(input);
+                crate::commands_memory::handle_graph(input);
                 continue;
             }
             s if s == "/forget" || s.starts_with("/forget ") => {
-                commands::handle_forget(input);
+                crate::commands_memory::handle_forget(input);
                 continue;
             }
             "/index" => {

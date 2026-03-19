@@ -38,6 +38,7 @@ mod ast;
 mod cli;
 mod commands;
 mod commands_git;
+mod commands_memory;
 mod commands_project;
 mod commands_session;
 mod docs;
