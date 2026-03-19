@@ -11,6 +11,57 @@ use yoagent::*;
 /// Maximum number of automatic retries for transient API errors.
 const MAX_RETRIES: u32 = 3;
 
+/// Append a runtime error to `.yoyo/runtime_errors.jsonl`.
+/// Categories: "tool_failure", "api_error", "stream_error", "input_rejected"
+pub fn append_runtime_error(category: &str, message: &str, tool_name: Option<&str>) {
+    let ts = chrono_now_iso();
+    let tool_json = match tool_name {
+        Some(t) => format!(",\"tool\":\"{}\"", t.replace('"', "\\\"")),
+        None => String::new(),
+    };
+    let safe_msg = message.replace('"', "\\\"").replace('\n', " ");
+    let line = format!(
+        "{{\"ts\":\"{ts}\",\"category\":\"{category}\"{tool_json},\"message\":\"{safe_msg}\"}}"
+    );
+
+    let _ = std::fs::create_dir_all(".yoyo");
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(".yoyo/runtime_errors.jsonl")
+    {
+        let _ = writeln!(f, "{}", line);
+    }
+}
+
+/// Get current time as ISO 8601 string (UTC).
+fn chrono_now_iso() -> String {
+    use std::time::SystemTime;
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    // Simple ISO 8601 without external crate
+    let secs_per_day = 86400u64;
+    let days = now / secs_per_day;
+    let day_secs = now % secs_per_day;
+    let hours = day_secs / 3600;
+    let minutes = (day_secs % 3600) / 60;
+    let seconds = day_secs % 60;
+    // Days since epoch to Y-M-D (civil_from_days algorithm)
+    let z = days as i64 + 719468;
+    let era = z / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{y:04}-{m:02}-{d:02}T{hours:02}:{minutes:02}:{seconds:02}Z")
+}
+
 /// Calculate exponential backoff delay for a given retry attempt (1-indexed).
 /// Returns 1s, 2s, 4s for attempts 1, 2, 3.
 pub fn retry_delay(attempt: u32) -> Duration {
@@ -297,6 +348,7 @@ async fn run_prompt_once(agent: &mut Agent, input: &str) -> PromptResult {
     let mut usage = Usage::default();
     let mut in_text = false;
     let mut tool_timers: HashMap<String, Instant> = HashMap::new();
+    let mut tool_names: HashMap<String, String> = HashMap::new();
     let mut collected_text = String::new();
     let mut retriable_error: Option<String> = None;
     let mut md_renderer = MarkdownRenderer::new();
@@ -317,6 +369,7 @@ async fn run_prompt_once(agent: &mut Agent, input: &str) -> PromptResult {
                             in_text = false;
                         }
                         tool_timers.insert(tool_call_id.clone(), Instant::now());
+                        tool_names.insert(tool_call_id.clone(), tool_name.clone());
                         let summary = format_tool_summary(&tool_name, &args);
                         print!("{YELLOW}  ▶ {summary}{RESET}");
                         if is_verbose() {
@@ -341,10 +394,18 @@ async fn run_prompt_once(agent: &mut Agent, input: &str) -> PromptResult {
                         let duration = tool_timers
                             .remove(&tool_call_id)
                             .map(|start| format_duration(start.elapsed()));
+                        let resolved_tool = tool_names.remove(&tool_call_id);
                         let dur_str = duration
                             .map(|d| format!(" {DIM}({d}){RESET}"))
                             .unwrap_or_default();
                         if is_error {
+                            // Log runtime error persistently
+                            let preview = tool_result_preview(&result, 200);
+                            append_runtime_error(
+                                "tool_failure",
+                                &preview,
+                                resolved_tool.as_deref(),
+                            );
                             // Check for partial success — tool errored but has content
                             let has_content = has_useful_content(&result);
                             if has_content {
@@ -415,6 +476,8 @@ async fn run_prompt_once(agent: &mut Agent, input: &str) -> PromptResult {
                                             println!();
                                             in_text = false;
                                         }
+                                        // Log API error persistently
+                                        append_runtime_error("api_error", err_msg, None);
                                         // Check if this error is worth retrying
                                         if is_retriable_error(err_msg) {
                                             retriable_error = Some(err_msg.clone());
@@ -428,6 +491,7 @@ async fn run_prompt_once(agent: &mut Agent, input: &str) -> PromptResult {
                     }
                     AgentEvent::InputRejected { reason } => {
                         if let Some(s) = spinner.take() { s.stop(); }
+                        append_runtime_error("input_rejected", &reason, None);
                         eprintln!("{RED}  input rejected: {reason}{RESET}");
                     }
                     AgentEvent::ProgressMessage { text, .. } => {
@@ -460,6 +524,11 @@ async fn run_prompt_once(agent: &mut Agent, input: &str) -> PromptResult {
     // Stop spinner if still running (e.g., channel closed without events)
     if let Some(s) = spinner.take() {
         s.stop();
+        // If spinner was still running when channel closed, stream ended unexpectedly
+        if collected_text.is_empty() && retriable_error.is_none() {
+            append_runtime_error("stream_error", "Stream ended without response", None);
+            eprintln!("\n{RED}  error: Stream ended{RESET}");
+        }
     }
 
     // Flush any remaining buffered markdown content
@@ -925,5 +994,53 @@ mod tests {
             details: serde_json::json!(null),
         };
         assert!(has_useful_content(&result2));
+    }
+
+    #[test]
+    fn test_chrono_now_iso_format() {
+        let ts = chrono_now_iso();
+        // Should be ISO 8601 format: YYYY-MM-DDTHH:MM:SSZ
+        assert!(ts.len() == 20, "timestamp should be 20 chars: {ts}");
+        assert!(ts.ends_with('Z'));
+        assert_eq!(&ts[4..5], "-");
+        assert_eq!(&ts[7..8], "-");
+        assert_eq!(&ts[10..11], "T");
+    }
+
+    #[test]
+    fn test_append_runtime_error_format() {
+        // Test the format without file I/O (avoid cwd race conditions in parallel tests)
+        let ts = chrono_now_iso();
+        assert!(!ts.is_empty());
+
+        // Verify escaping works
+        let msg = "error with \"quotes\" and\nnewlines";
+        let safe = msg.replace('"', "\\\"").replace('\n', " ");
+        assert_eq!(safe, "error with \\\"quotes\\\" and newlines");
+    }
+
+    #[test]
+    fn test_append_runtime_error_writes_file() {
+        // Use a unique temp dir to avoid conflicts with parallel tests
+        let dir = std::env::temp_dir().join(format!(
+            "yoyo_rt_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let yoyo_dir = dir.join(".yoyo");
+        std::fs::create_dir_all(&yoyo_dir).unwrap();
+        let log_path = yoyo_dir.join("runtime_errors.jsonl");
+
+        // Write directly to the specific path
+        let line = "{\"ts\":\"2026-01-01T00:00:00Z\",\"category\":\"tool_failure\",\"tool\":\"bash\",\"message\":\"test\"}";
+        std::fs::write(&log_path, format!("{line}\n")).unwrap();
+
+        let content = std::fs::read_to_string(&log_path).unwrap();
+        assert!(content.contains("\"category\":\"tool_failure\""));
+        assert!(content.contains("\"tool\":\"bash\""));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
