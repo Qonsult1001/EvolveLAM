@@ -77,6 +77,15 @@ Uses `yoagent::Agent` with `AnthropicProvider`, `default_tools()`, and an option
 - `communicate` — write journal entries and issue responses
 - `research` — internet lookups and knowledge caching
 
+Additional skills (mutable, created by the agent or contributors):
+
+- `plan` — decompose goals into actionable tasks, prioritize work, maintain strategic direction
+- `build` — write code, create artifacts, implement changes (general-purpose, vs evolve for self-modification)
+- `test` — validate changes through unit tests, integration tests, regression checks
+- `debug` — diagnose failures by reading errors, tracing execution, isolating root causes
+- `release` — evaluate readiness for publishing
+- `social` — community interaction and social learning
+
 **Memory system** (`memory/`): Three-layer architecture — append-only JSONL archives (source of truth, never compressed), latent space connection graph (weighted associations between concepts), and active context markdown (regenerated daily by `.github/workflows/synthesize.yml` with time-weighted compression tiers):
 - `memory/learnings.jsonl` — self-reflection archive. Each line: `{"type":"lesson","day":N,"ts":"ISO8601","source":"...","title":"...","context":"...","takeaway":"..."}`
 - `memory/social_learnings.jsonl` — social insight archive. Each line: `{"type":"social","day":N,"ts":"ISO8601","source":"...","who":"@user","insight":"..."}`

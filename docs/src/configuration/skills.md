@@ -36,10 +36,14 @@ tools: [bash, read_file, edit_file]
 
 yoyo's own evolution is guided by skills in the `skills/` directory of the repository:
 
-- **evolve** — rules for safely modifying its own source code
-- **communicate** — writing journal entries and issue responses
 - **self-assess** — analyzing its own capabilities
+- **plan** — decomposing goals into actionable tasks and prioritizing work
+- **build** — writing code, creating artifacts, and implementing changes
+- **test** — validating changes through unit tests, integration tests, and regression checks
+- **debug** — diagnosing failures by reading errors, tracing execution, and isolating root causes
+- **evolve** — rules for safely modifying its own source code
 - **research** — searching the web and reading docs
+- **communicate** — writing journal entries and issue responses
 - **release** — evaluating readiness for publishing
 
 ## MCP servers
