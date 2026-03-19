@@ -13,6 +13,9 @@ const MAX_RETRIES: u32 = 3;
 
 /// Append a runtime error to `.yoyo/runtime_errors.jsonl`.
 /// Categories: "tool_failure", "api_error", "stream_error", "input_rejected"
+///
+/// Deduplicates: skips if the last logged entry has the same category+message
+/// and was logged within 2 seconds (prevents retry-storm log bloat).
 pub fn append_runtime_error(category: &str, message: &str, tool_name: Option<&str>) {
     let ts = chrono_now_iso();
     let tool_json = match tool_name {
@@ -24,14 +27,62 @@ pub fn append_runtime_error(category: &str, message: &str, tool_name: Option<&st
         "{{\"ts\":\"{ts}\",\"category\":\"{category}\"{tool_json},\"message\":\"{safe_msg}\"}}"
     );
 
+    let log_path = ".yoyo/runtime_errors.jsonl";
     let _ = std::fs::create_dir_all(".yoyo");
+
+    // Deduplicate: check if last line has the same category+message
+    if let Ok(existing) = std::fs::read_to_string(log_path) {
+        if let Some(last_line) = existing.lines().rev().find(|l| !l.trim().is_empty()) {
+            if is_duplicate_runtime_entry(last_line, category, &safe_msg, &ts) {
+                return;
+            }
+        }
+    }
+
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(".yoyo/runtime_errors.jsonl")
+        .open(log_path)
     {
         let _ = writeln!(f, "{}", line);
     }
+}
+
+/// Check if a JSONL line is a duplicate of the current error (same category+message, within 2s).
+pub fn is_duplicate_runtime_entry(
+    last_line: &str,
+    category: &str,
+    safe_msg: &str,
+    current_ts: &str,
+) -> bool {
+    // Quick check: does the line contain both the category and message?
+    let cat_needle = format!("\"category\":\"{category}\"");
+    let msg_needle = format!("\"message\":\"{safe_msg}\"");
+    if !last_line.contains(&cat_needle) || !last_line.contains(&msg_needle) {
+        return false;
+    }
+
+    // Check timestamp proximity (within 2 seconds)
+    // Extract ts from the last line
+    if let Some(ts_start) = last_line.find("\"ts\":\"") {
+        let ts_rest = &last_line[ts_start + 6..];
+        if let Some(ts_end) = ts_rest.find('"') {
+            let last_ts = &ts_rest[..ts_end];
+            // ISO timestamps are lexicographically ordered and fixed-width
+            // Compare: if difference in last 2 chars (seconds) is ≤ 2
+            if last_ts.len() == 20 && current_ts.len() == 20 && last_ts[..17] == current_ts[..17] {
+                // Same date+hour+minute, check seconds
+                if let (Ok(last_sec), Ok(cur_sec)) = (
+                    last_ts[17..19].parse::<u32>(),
+                    current_ts[17..19].parse::<u32>(),
+                ) {
+                    return cur_sec.abs_diff(last_sec) <= 2;
+                }
+            }
+        }
+    }
+
+    false
 }
 
 /// Get current time as ISO 8601 string (UTC).
@@ -1046,5 +1097,67 @@ mod tests {
         assert!(content.contains("\"tool\":\"bash\""));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_is_duplicate_runtime_entry_same_category_message_within_2s() {
+        let last = r#"{"ts":"2026-03-19T10:00:05Z","category":"api_error","message":"connection refused"}"#;
+        assert!(is_duplicate_runtime_entry(
+            last,
+            "api_error",
+            "connection refused",
+            "2026-03-19T10:00:06Z"
+        ));
+        assert!(is_duplicate_runtime_entry(
+            last,
+            "api_error",
+            "connection refused",
+            "2026-03-19T10:00:07Z"
+        ));
+    }
+
+    #[test]
+    fn test_is_duplicate_runtime_entry_same_but_too_far() {
+        let last = r#"{"ts":"2026-03-19T10:00:05Z","category":"api_error","message":"connection refused"}"#;
+        assert!(!is_duplicate_runtime_entry(
+            last,
+            "api_error",
+            "connection refused",
+            "2026-03-19T10:00:10Z"
+        ));
+    }
+
+    #[test]
+    fn test_is_duplicate_runtime_entry_different_category() {
+        let last = r#"{"ts":"2026-03-19T10:00:05Z","category":"api_error","message":"connection refused"}"#;
+        assert!(!is_duplicate_runtime_entry(
+            last,
+            "tool_failure",
+            "connection refused",
+            "2026-03-19T10:00:06Z"
+        ));
+    }
+
+    #[test]
+    fn test_is_duplicate_runtime_entry_different_message() {
+        let last = r#"{"ts":"2026-03-19T10:00:05Z","category":"api_error","message":"connection refused"}"#;
+        assert!(!is_duplicate_runtime_entry(
+            last,
+            "api_error",
+            "timeout",
+            "2026-03-19T10:00:06Z"
+        ));
+    }
+
+    #[test]
+    fn test_is_duplicate_runtime_entry_different_minute() {
+        let last = r#"{"ts":"2026-03-19T10:00:59Z","category":"api_error","message":"error"}"#;
+        // Different minute — not a duplicate even if message matches
+        assert!(!is_duplicate_runtime_entry(
+            last,
+            "api_error",
+            "error",
+            "2026-03-19T10:01:01Z"
+        ));
     }
 }
