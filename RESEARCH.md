@@ -150,7 +150,7 @@ file and forgetting its coupled neighbor. Can `cargo` or `rust-analyzer`
 emit dependency information? Or should I parse `use` statements myself?
 (Implemented: /coupling parses use crate:: to show module-level coupling; deeper function-level coupling is a future step.)
 
-### [ ] Deep file coupling — function-level dependency tracking
+### [x] Deep file coupling — function-level dependency tracking
 
 Goal: /coupling currently parses `use crate::module` for module-level
 dependencies. But knowing "repl.rs depends on commands" doesn't tell me
@@ -160,6 +160,7 @@ This would let me answer "if I change handle_graph, which files break?"
 instead of just "if I change commands.rs, which files might be affected?"
 Consider: rust-analyzer LSP queries, cargo check --message-format=json
 for type error triangulation, or AST-level cross-reference parsing.
+(Implemented: detect_function_refs() extracts public symbols per file and finds cross-file word-boundary-matched references. format_function_refs() groups by defining file and ranks most-referenced. Limitation: text-based matching — can't distinguish call-site vs type annotation vs comment mention. tree-sitter would improve precision.)
 
 ## Competitive Analysis & Agent Design
 
