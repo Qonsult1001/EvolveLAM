@@ -752,6 +752,7 @@ pub fn handle_health() {
             .collect::<Vec<_>>(),
     );
     if all_passed {
+        check_fix_resolution();
         println!("\n{GREEN}  All checks passed ✓{RESET}");
     } else {
         println!("\n{RED}  Some checks failed ✗{RESET}");
@@ -889,6 +890,8 @@ pub async fn handle_fix(
         .map(|(name, _, output)| (*name, output.as_str()))
         .collect();
     if failures.is_empty() {
+        // All checks passed — if there was a pending fix, mark it as resolved
+        check_fix_resolution();
         println!("\n{GREEN}  All checks passed — nothing to fix ✓{RESET}\n");
         return None;
     }
@@ -914,6 +917,7 @@ pub async fn handle_fix(
     };
     if !all_categories.is_empty() {
         append_error_log(&all_categories, "fix");
+        record_fix_pending(&all_categories);
     }
     println!("\n{YELLOW}  Sending {fail_count} failure(s) to AI for fixing...{RESET}\n");
     let fix_prompt = build_fix_prompt(&failures);
@@ -1687,6 +1691,9 @@ pub struct ErrorLogEntry {
     pub day: u32,
     pub categories: Vec<(String, usize)>,
     pub source: String,
+    /// Whether this error set was resolved by a subsequent successful build.
+    /// None = unknown (old entries), Some(true) = fixed, Some(false) = not yet fixed.
+    pub resolved: Option<bool>,
 }
 
 /// Append an error frequency record to `.yoyo/error_log.jsonl`.
@@ -1724,7 +1731,7 @@ pub fn append_error_log(categories: &[(RustErrorCategory, usize)], source: &str)
         .map(|(cat, count)| format!("\"{}\":{}", cat, count))
         .collect();
     let line = format!(
-        "{{\"ts\":\"{}\",\"day\":{},\"categories\":{{{}}},\"source\":\"{}\"}}",
+        "{{\"ts\":\"{}\",\"day\":{},\"categories\":{{{}}},\"source\":\"{}\",\"resolved\":\"false\"}}",
         ts,
         day,
         cat_entries.join(","),
@@ -1738,6 +1745,82 @@ pub fn append_error_log(categories: &[(RustErrorCategory, usize)], source: &str)
     {
         let _ = writeln!(f, "{}", line);
     }
+}
+
+/// Record that a fix attempt is pending — saves the error categories to a marker file.
+/// Called after `/fix` sends errors to the AI.
+pub fn record_fix_pending(categories: &[(RustErrorCategory, usize)]) {
+    let yoyo_dir = std::path::Path::new(".yoyo");
+    if !yoyo_dir.exists() {
+        let _ = std::fs::create_dir_all(yoyo_dir);
+    }
+    let cats: Vec<String> = categories
+        .iter()
+        .map(|(cat, _)| format!("{}", cat))
+        .collect();
+    let content = cats.join(",");
+    let _ = std::fs::write(".yoyo/fix_pending.txt", content);
+}
+
+/// Check if a pending fix was resolved by a successful build.
+/// If `.yoyo/fix_pending.txt` exists, mark the most recent unresolved error log entry as resolved.
+/// Call this after any successful build/test pass.
+pub fn check_fix_resolution() {
+    let pending_path = std::path::Path::new(".yoyo/fix_pending.txt");
+    if !pending_path.exists() {
+        return;
+    }
+    // Read and remove the pending marker
+    let _ = std::fs::remove_file(pending_path);
+
+    // Mark unresolved entries in error_log.jsonl as resolved
+    let log_path = std::path::Path::new(".yoyo/error_log.jsonl");
+    let content = match std::fs::read_to_string(log_path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    // Rewrite lines, changing the last unresolved entry to resolved
+    let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+    // Find the last line with "resolved":"false" and change it to "resolved":"true"
+    for line in lines.iter_mut().rev() {
+        if line.contains("\"resolved\":\"false\"") {
+            *line = line.replace("\"resolved\":\"false\"", "\"resolved\":\"true\"");
+            break;
+        }
+    }
+    let new_content = lines.join("\n");
+    let _ = std::fs::write(
+        log_path,
+        if new_content.is_empty() {
+            new_content
+        } else {
+            new_content + "\n"
+        },
+    );
+}
+
+/// Compute fix success rates per error category from the error log.
+/// Returns a vec of (category, total_occurrences, resolved_count).
+pub fn compute_fix_rates(entries: &[ErrorLogEntry]) -> Vec<(String, usize, usize)> {
+    let mut totals: std::collections::HashMap<String, (usize, usize)> =
+        std::collections::HashMap::new();
+    for entry in entries {
+        let is_resolved = entry.resolved == Some(true);
+        for (cat, count) in &entry.categories {
+            let e = totals.entry(cat.clone()).or_insert((0, 0));
+            e.0 += count;
+            if is_resolved {
+                e.1 += count;
+            }
+        }
+    }
+    let mut result: Vec<(String, usize, usize)> = totals
+        .into_iter()
+        .map(|(cat, (total, resolved))| (cat, total, resolved))
+        .collect();
+    result.sort_by(|a, b| b.1.cmp(&a.1));
+    result
 }
 
 /// Parse error log entries from JSONL content.
@@ -1761,11 +1844,17 @@ fn parse_error_log_line(line: &str) -> Option<ErrorLogEntry> {
     let day = extract_json_number(line, "day")?;
     let source = extract_json_string(line, "source")?;
     let categories = extract_json_categories(line)?;
+    let resolved = extract_json_string(line, "resolved").and_then(|s| match s.as_str() {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    });
     Some(ErrorLogEntry {
         ts,
         day,
         categories,
         source,
+        resolved,
     })
 }
 
@@ -1844,6 +1933,22 @@ pub fn format_errors_display(entries: &[ErrorLogEntry]) -> String {
         out.push_str(&format!("\n  Most common: {} ({})\n", top_cat, top_count));
     }
 
+    // Fix success rates
+    let rates = compute_fix_rates(entries);
+    let has_resolution_data = rates.iter().any(|(_, _, resolved)| *resolved > 0);
+    if has_resolution_data {
+        out.push_str("\n  Fix success rates:\n");
+        for (cat, total, resolved) in &rates {
+            if *total > 0 {
+                let pct = (*resolved as f64 / *total as f64) * 100.0;
+                out.push_str(&format!(
+                    "    {}: {}/{} ({:.0}%)\n",
+                    cat, resolved, total, pct
+                ));
+            }
+        }
+    }
+
     out.push_str("\n  Recent events:\n");
     let recent: Vec<&ErrorLogEntry> = entries.iter().rev().take(5).collect();
     for entry in recent {
@@ -1852,11 +1957,17 @@ pub fn format_errors_display(entries: &[ErrorLogEntry]) -> String {
             .iter()
             .map(|(c, n)| format!("{} {}", n, c))
             .collect();
+        let resolved_marker = match entry.resolved {
+            Some(true) => " ✓",
+            Some(false) => " ✗",
+            None => "",
+        };
         out.push_str(&format!(
-            "    [{}] day {} — {}\n",
+            "    [{}] day {} — {}{}\n",
             entry.ts,
             entry.day,
-            cats.join(", ")
+            cats.join(", "),
+            resolved_marker
         ));
     }
     out

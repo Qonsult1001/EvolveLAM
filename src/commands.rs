@@ -976,7 +976,7 @@ mod tests {
     };
     use crate::commands_project::{
         build_commands_for_project, build_fix_prompt, build_project_tree, classify_failure_oneline,
-        classify_rust_error, detect_project_name, detect_project_type,
+        classify_rust_error, compute_fix_rates, detect_project_name, detect_project_type,
         extract_first_meaningful_line, find_files, fix_strategy, format_error_classification,
         format_errors_display, format_health_timing_summary, format_project_index,
         format_tree_from_paths, fuzzy_score, generate_init_content, health_checks_for_project,
@@ -3720,6 +3720,19 @@ test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
         assert_eq!(entries[0].categories.len(), 2);
         assert_eq!(entries[0].categories[0], ("missing_import".to_string(), 3));
         assert_eq!(entries[0].categories[1], ("borrow_checker".to_string(), 1));
+        assert_eq!(entries[0].resolved, None); // old entries without resolved field
+    }
+
+    #[test]
+    fn test_parse_error_log_with_resolved_field() {
+        let line = r#"{"ts":"2026-03-19T06:30:00Z","day":19,"categories":{"missing_import":2},"source":"fix","resolved":"true"}"#;
+        let entries = parse_error_log(line);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].resolved, Some(true));
+
+        let line2 = r#"{"ts":"2026-03-19T06:30:00Z","day":19,"categories":{"missing_import":2},"source":"fix","resolved":"false"}"#;
+        let entries2 = parse_error_log(line2);
+        assert_eq!(entries2[0].resolved, Some(false));
     }
 
     #[test]
@@ -3750,6 +3763,7 @@ test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
                     ("borrow_checker".to_string(), 1),
                 ],
                 source: "fix".to_string(),
+                resolved: None,
             },
             ErrorLogEntry {
                 ts: "2026-03-19T06:00:00Z".to_string(),
@@ -3759,6 +3773,7 @@ test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
                     ("type_mismatch".to_string(), 4),
                 ],
                 source: "fix".to_string(),
+                resolved: None,
             },
         ];
         let totals = summarize_error_log(&entries);
@@ -3784,6 +3799,7 @@ test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
                 day: 18,
                 categories: vec![("missing_import".to_string(), 3)],
                 source: "fix".to_string(),
+                resolved: None,
             },
             ErrorLogEntry {
                 ts: "2026-03-19T06:00:00Z".to_string(),
@@ -3793,6 +3809,7 @@ test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
                     ("missing_import".to_string(), 1),
                 ],
                 source: "fix".to_string(),
+                resolved: None,
             },
         ];
         let display = format_errors_display(&entries);
@@ -3812,5 +3829,104 @@ test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
         let entries = parse_error_log(content);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].categories[0].0, "unused");
+    }
+
+    #[test]
+    fn test_compute_fix_rates_mixed_resolved() {
+        let entries = vec![
+            ErrorLogEntry {
+                ts: "t1".to_string(),
+                day: 19,
+                categories: vec![("missing_import".to_string(), 3)],
+                source: "fix".to_string(),
+                resolved: Some(true),
+            },
+            ErrorLogEntry {
+                ts: "t2".to_string(),
+                day: 19,
+                categories: vec![
+                    ("missing_import".to_string(), 2),
+                    ("borrow_checker".to_string(), 1),
+                ],
+                source: "fix".to_string(),
+                resolved: Some(false),
+            },
+        ];
+        let rates = compute_fix_rates(&entries);
+        // missing_import: 5 total, 3 resolved
+        let mi = rates
+            .iter()
+            .find(|(c, _, _)| c == "missing_import")
+            .unwrap();
+        assert_eq!(mi.1, 5);
+        assert_eq!(mi.2, 3);
+        // borrow_checker: 1 total, 0 resolved
+        let bc = rates
+            .iter()
+            .find(|(c, _, _)| c == "borrow_checker")
+            .unwrap();
+        assert_eq!(bc.1, 1);
+        assert_eq!(bc.2, 0);
+    }
+
+    #[test]
+    fn test_compute_fix_rates_none_resolved_treated_as_unresolved() {
+        let entries = vec![ErrorLogEntry {
+            ts: "t1".to_string(),
+            day: 18,
+            categories: vec![("type_mismatch".to_string(), 4)],
+            source: "fix".to_string(),
+            resolved: None,
+        }];
+        let rates = compute_fix_rates(&entries);
+        assert_eq!(rates[0], ("type_mismatch".to_string(), 4, 0));
+    }
+
+    #[test]
+    fn test_format_errors_display_shows_fix_rates() {
+        let entries = vec![
+            ErrorLogEntry {
+                ts: "2026-03-18T12:00:00Z".to_string(),
+                day: 18,
+                categories: vec![("missing_import".to_string(), 3)],
+                source: "fix".to_string(),
+                resolved: Some(true),
+            },
+            ErrorLogEntry {
+                ts: "2026-03-19T06:00:00Z".to_string(),
+                day: 19,
+                categories: vec![("missing_import".to_string(), 2)],
+                source: "fix".to_string(),
+                resolved: Some(false),
+            },
+        ];
+        let display = format_errors_display(&entries);
+        assert!(display.contains("Fix success rates"));
+        assert!(display.contains("missing_import: 3/5"));
+        assert!(display.contains("60%"));
+    }
+
+    #[test]
+    fn test_format_errors_display_resolved_markers() {
+        let entries = vec![
+            ErrorLogEntry {
+                ts: "2026-03-18T12:00:00Z".to_string(),
+                day: 18,
+                categories: vec![("unused".to_string(), 1)],
+                source: "fix".to_string(),
+                resolved: Some(true),
+            },
+            ErrorLogEntry {
+                ts: "2026-03-19T06:00:00Z".to_string(),
+                day: 19,
+                categories: vec![("unused".to_string(), 1)],
+                source: "fix".to_string(),
+                resolved: Some(false),
+            },
+        ];
+        let display = format_errors_display(&entries);
+        // Recent events should show ✓ and ✗ markers
+        assert!(display.contains("✓"));
+        assert!(display.contains("✗"));
     }
 }

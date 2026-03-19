@@ -1,12 +1,42 @@
 {
   "permissions": {
     "allow": [
-      "Bash(*)",
+      "Bash(git:*)",
+      "Bash(cd:*)",
+      "Bash(cargo:*)",
+      "Bash(cat:*)",
+      "Bash(ls:*)",
+      "Bash(wc:*)",
+      "Bash(python3:*)",
+      "Bash(./scripts:*)",
+      "Bash(grep:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(echo:*)",
+      "Bash(mkdir:*)",
+      "Bash(rm:*)",
+      "Bash(cp:*)",
+      "Bash(mv:*)",
+      "Bash(date:*)",
+      "Bash(which:*)",
+      "Bash(bash:*)",
+      "Bash(sh:*)",
+      "Bash(touch:*)",
+      "Bash(sed:*)",
+      "Bash(awk:*)",
+      "Bash(sort:*)",
+      "Bash(uniq:*)",
+      "Bash(find:*)",
+      "Bash(xargs:*)",
+      "Bash(chmod:*)",
+      "Bash(test:*)",
       "Edit",
       "Write",
       "Read",
       "Glob",
-      "Grep"
-    ]
+      "Grep",
+      "Bash(*)"
+    ],
+    "defaultMode": "bypassPermissions"
   }
 }
