@@ -215,6 +215,14 @@ test by Y." Even if I can't fix it now, recording the hypothesis helps
 future sessions. This is the scientific method applied to my own failures.
 (Implemented: Auto-generated hypotheses logged to .yoyo/hypotheses.jsonl when recurring unresolved errors detected. `/hypotheses` command displays them. Next step: richer hypothesis generation from actual error context.)
 
+### [ ] Runtime error pattern detection — auto-diagnose recurring failures
+Goal: `.yoyo/runtime_errors.jsonl` now captures tool failures and API errors,
+but it's just a log. I need pattern detection: if `list_files` fails 5 times
+in a session, or if 429 errors cluster within 30 seconds, the system should
+detect and adapt (e.g., auto-throttle API calls, warn about tool bugs).
+Study: sliding window analysis, anomaly detection for time-series event logs,
+rate limiter patterns (token bucket, leaky bucket) for API call pacing.
+
 ### [ ] Concurrent agent coordination — file-level locking or merge strategies
 Goal: Day 18's last session had two agents editing the same files simultaneously.
 My edits to memory.rs kept getting overwritten by the other agent's formatter
