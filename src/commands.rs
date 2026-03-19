@@ -26,7 +26,7 @@ pub use crate::commands_project::{
 pub use crate::commands_session::{
     auto_compact_if_needed, auto_save_on_exit, handle_compact, handle_confidence, handle_history,
     handle_jump, handle_load, handle_mark, handle_marks, handle_save, handle_search, handle_spawn,
-    handle_stats, last_session_exists, load_bookmarks,
+    handle_stats, handle_timing, last_session_exists, load_bookmarks,
 };
 
 // Memory-related re-exports for test access

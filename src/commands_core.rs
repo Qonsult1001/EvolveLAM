@@ -65,6 +65,7 @@ pub const KNOWN_COMMANDS: &[&str] = &[
     "/stats",
     "/confidence",
     "/hypotheses",
+    "/timing",
 ];
 
 /// Well-known model names for `/model <Tab>` completion.
@@ -249,6 +250,7 @@ pub fn help_text() -> String {
     out.push_str("  /ast <pattern>     Search code symbols (fn, struct, trait, class, etc.)\n");
     out.push_str("  /coupling          Show file coupling map (use crate:: imports)\n");
     out.push_str("  /gap               Show gap analysis stats and update CLAUDE_CODE_GAP.md\n");
+    out.push_str("  /timing            Show session duration history\n");
     out.push('\n');
 
     // ── AI ──

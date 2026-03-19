@@ -1275,6 +1275,120 @@ pub fn handle_stats() {
     println!("{DIM}{display}{RESET}\n");
 }
 
+// ── /timing ─────────────────────────────────────────────────────────────
+
+pub struct SessionTiming {
+    #[allow(dead_code)]
+    pub day: u32,
+    pub session_time: String,
+    pub duration_secs: u64,
+    pub tasks_completed: u32,
+    pub tasks_reverted: u32,
+}
+
+pub fn parse_session_timings(content: &str) -> Vec<SessionTiming> {
+    let mut entries = Vec::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        // Parse JSON manually: {"day":N,"session_time":"HH:MM","duration_secs":N,"tasks_completed":N,"tasks_reverted":N}
+        let day = extract_timing_u32(line, "day").unwrap_or(0);
+        let session_time = extract_timing_string(line, "session_time").unwrap_or_default();
+        let duration_secs = extract_timing_u64(line, "duration_secs").unwrap_or(0);
+        let tasks_completed = extract_timing_u32(line, "tasks_completed").unwrap_or(0);
+        let tasks_reverted = extract_timing_u32(line, "tasks_reverted").unwrap_or(0);
+
+        if duration_secs > 0 || !session_time.is_empty() {
+            entries.push(SessionTiming {
+                day,
+                session_time,
+                duration_secs,
+                tasks_completed,
+                tasks_reverted,
+            });
+        }
+    }
+    entries
+}
+
+fn extract_timing_u32(json: &str, key: &str) -> Option<u32> {
+    let pattern = format!("\"{}\":", key);
+    let idx = json.find(&pattern)? + pattern.len();
+    let rest = &json[idx..];
+    let end = rest.find([',', '}'])?;
+    rest[..end].trim().parse().ok()
+}
+
+fn extract_timing_u64(json: &str, key: &str) -> Option<u64> {
+    let pattern = format!("\"{}\":", key);
+    let idx = json.find(&pattern)? + pattern.len();
+    let rest = &json[idx..];
+    let end = rest.find([',', '}'])?;
+    rest[..end].trim().parse().ok()
+}
+
+fn extract_timing_string(json: &str, key: &str) -> Option<String> {
+    let pattern = format!("\"{}\":\"", key);
+    let idx = json.find(&pattern)? + pattern.len();
+    let rest = &json[idx..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
+}
+
+pub fn format_timing_display(entries: &[SessionTiming]) -> String {
+    let mut out = String::new();
+    if entries.is_empty() {
+        out.push_str("  No session timing data recorded yet.\n");
+        out.push_str("  (Timing is logged by evolve-ide.sh finish)\n");
+        return out;
+    }
+
+    out.push_str("  Session Timing History:\n\n");
+    out.push_str("  Day  | Time  | Duration | Tasks | Reverts\n");
+    out.push_str("  ─────┼───────┼──────────┼───────┼────────\n");
+
+    for entry in entries {
+        let mins = entry.duration_secs / 60;
+        let secs = entry.duration_secs % 60;
+        out.push_str(&format!(
+            "  {:>4} | {:>5} | {:>4}m{:02}s | {:>5} | {:>5}\n",
+            entry.day, entry.session_time, mins, secs, entry.tasks_completed, entry.tasks_reverted,
+        ));
+    }
+
+    // Summary
+    let total_secs: u64 = entries.iter().map(|e| e.duration_secs).sum();
+    let total_tasks: u32 = entries.iter().map(|e| e.tasks_completed).sum();
+    let total_reverts: u32 = entries.iter().map(|e| e.tasks_reverted).sum();
+    let avg_secs = if entries.is_empty() {
+        0
+    } else {
+        total_secs / entries.len() as u64
+    };
+
+    out.push_str(&format!("\n  {} sessions total\n", entries.len()));
+    out.push_str(&format!(
+        "  Average duration: {}m{:02}s\n",
+        avg_secs / 60,
+        avg_secs % 60
+    ));
+    out.push_str(&format!(
+        "  Total tasks: {} completed, {} reverted\n",
+        total_tasks, total_reverts
+    ));
+
+    out
+}
+
+pub fn handle_timing() {
+    let content = std::fs::read_to_string(".yoyo/session_timing.jsonl").unwrap_or_default();
+    let entries = parse_session_timings(&content);
+    let display = format_timing_display(&entries);
+    println!("{DIM}{display}{RESET}\n");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1611,5 +1725,56 @@ mod tests {
         let entries = parse_confidence_log(content);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].confidence, "LOW");
+    }
+
+    // ── /timing tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_session_timings_basic() {
+        let content = r#"{"day":19,"session_time":"10:22","duration_secs":1200,"tasks_completed":5,"tasks_reverted":0}
+{"day":19,"session_time":"16:45","duration_secs":900,"tasks_completed":3,"tasks_reverted":1}"#;
+        let entries = parse_session_timings(content);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].duration_secs, 1200);
+        assert_eq!(entries[0].tasks_completed, 5);
+        assert_eq!(entries[1].tasks_reverted, 1);
+    }
+
+    #[test]
+    fn test_parse_session_timings_empty() {
+        assert!(parse_session_timings("").is_empty());
+        assert!(parse_session_timings("\n\n").is_empty());
+    }
+
+    #[test]
+    fn test_format_timing_display_empty() {
+        let display = format_timing_display(&[]);
+        assert!(display.contains("No session timing"));
+    }
+
+    #[test]
+    fn test_format_timing_display_with_data() {
+        let entries = vec![
+            SessionTiming {
+                day: 19,
+                session_time: "10:22".to_string(),
+                duration_secs: 1200,
+                tasks_completed: 5,
+                tasks_reverted: 0,
+            },
+            SessionTiming {
+                day: 19,
+                session_time: "16:45".to_string(),
+                duration_secs: 600,
+                tasks_completed: 3,
+                tasks_reverted: 1,
+            },
+        ];
+        let display = format_timing_display(&entries);
+        assert!(display.contains("20m00s"));
+        assert!(display.contains("10m00s"));
+        assert!(display.contains("2 sessions"));
+        assert!(display.contains("Average duration: 15m00s"));
+        assert!(display.contains("8 completed, 1 reverted"));
     }
 }

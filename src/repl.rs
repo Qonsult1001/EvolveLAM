@@ -442,6 +442,10 @@ pub async fn run_repl(
                 commands::handle_hypotheses();
                 continue;
             }
+            "/timing" => {
+                commands::handle_timing();
+                continue;
+            }
             "/test" => {
                 commands::handle_test();
                 continue;
