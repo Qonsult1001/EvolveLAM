@@ -733,8 +733,8 @@ pub fn handle_health() {
         println!("{DIM}  No checks configured for {project_type}{RESET}\n");
         return;
     }
-    let all_passed = results.iter().all(|(_, passed, _, _)| *passed);
-    for (name, passed, detail, classification) in &results {
+    let all_passed = results.iter().all(|(_, passed, _, _, _)| *passed);
+    for (name, passed, detail, classification, _) in &results {
         let icon = if *passed {
             format!("{GREEN}✓{RESET}")
         } else {
@@ -745,18 +745,25 @@ pub fn handle_health() {
             println!("{DIM}    {classification}{RESET}");
         }
     }
+    let timing = format_health_timing_summary(
+        &results
+            .iter()
+            .map(|(n, p, d, c, dur)| (*n, *p, d.clone(), c.clone(), *dur))
+            .collect::<Vec<_>>(),
+    );
     if all_passed {
-        println!("\n{GREEN}  All checks passed ✓{RESET}\n");
+        println!("\n{GREEN}  All checks passed ✓{RESET}");
     } else {
-        println!("\n{RED}  Some checks failed ✗{RESET}\n");
+        println!("\n{RED}  Some checks failed ✗{RESET}");
     }
+    println!("{DIM}{timing}{RESET}\n");
 }
 
 /// Run health checks and classify failures.
-/// Returns (name, passed, display_detail, classification_summary).
+/// Returns (name, passed, display_detail, classification_summary, elapsed).
 pub fn run_health_checks_with_classification(
     project_type: &ProjectType,
-) -> Vec<(&'static str, bool, String, String)> {
+) -> Vec<(&'static str, bool, String, String, std::time::Duration)> {
     let checks = health_checks_for_project(project_type);
 
     let mut results = Vec::new();
@@ -765,10 +772,11 @@ pub fn run_health_checks_with_classification(
         let output = std::process::Command::new(args[0])
             .args(&args[1..])
             .output();
-        let elapsed = format_duration(start.elapsed());
+        let dur = start.elapsed();
+        let elapsed = format_duration(dur);
         match output {
             Ok(o) if o.status.success() => {
-                results.push((name, true, format!("ok ({elapsed})"), String::new()));
+                results.push((name, true, format!("ok ({elapsed})"), String::new(), dur));
             }
             Ok(o) => {
                 let stdout = String::from_utf8_lossy(&o.stdout);
@@ -790,14 +798,33 @@ pub fn run_health_checks_with_classification(
                     full_output.push_str(&stderr);
                 }
                 let classification = classify_failure_oneline(name, &full_output);
-                results.push((name, false, detail, classification));
+                results.push((name, false, detail, classification, dur));
             }
             Err(e) => {
-                results.push((name, false, format!("ERROR: {e}"), String::new()));
+                results.push((name, false, format!("ERROR: {e}"), String::new(), dur));
             }
         }
     }
     results
+}
+
+/// Format a health check timing summary line from check results.
+pub fn format_health_timing_summary(
+    results: &[(&str, bool, String, String, std::time::Duration)],
+) -> String {
+    if results.is_empty() {
+        return String::new();
+    }
+    let total: std::time::Duration = results.iter().map(|(_, _, _, _, d)| *d).sum();
+    let parts: Vec<String> = results
+        .iter()
+        .map(|(name, _, _, _, d)| format!("{}: {}", name, format_duration(*d)))
+        .collect();
+    format!(
+        "  Health check completed in {} ({})",
+        format_duration(total),
+        parts.join(", ")
+    )
 }
 
 /// Classify a single failure's error output into a one-line summary.

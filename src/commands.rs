@@ -894,10 +894,10 @@ mod tests {
         build_commands_for_project, build_fix_prompt, build_project_tree, classify_failure_oneline,
         classify_rust_error, detect_project_name, detect_project_type,
         extract_first_meaningful_line, find_files, fix_strategy, format_error_classification,
-        format_errors_display, format_project_index, format_tree_from_paths, fuzzy_score,
-        generate_init_content, health_checks_for_project, highlight_match, is_binary_extension,
-        lint_command_for_project, parse_error_log, parse_test_summary,
-        run_health_check_for_project, run_health_checks_full_output,
+        format_errors_display, format_health_timing_summary, format_project_index,
+        format_tree_from_paths, fuzzy_score, generate_init_content, health_checks_for_project,
+        highlight_match, is_binary_extension, lint_command_for_project, parse_error_log,
+        parse_test_summary, run_health_check_for_project, run_health_checks_full_output,
         run_health_checks_with_classification, run_shell_command, scan_important_dirs,
         scan_important_files, summarize_error_log, test_command_for_project, ErrorLogEntry,
         IndexEntry, ProjectType, RustErrorCategory, TestSummary,
@@ -3490,12 +3490,68 @@ mod tests {
 
     #[test]
     fn test_run_health_checks_with_classification_returns_tuples() {
-        // Verifies the function signature works and returns 4-tuples
+        // Verifies the function signature works and returns 5-tuples (with Duration)
         let results = run_health_checks_with_classification(&ProjectType::Unknown);
         assert!(
             results.is_empty(),
             "Unknown project type should have no checks"
         );
+    }
+
+    // ── Health timing summary tests ──────────────────────────────────
+
+    #[test]
+    fn test_format_health_timing_summary_empty() {
+        let results: Vec<(&str, bool, String, String, std::time::Duration)> = vec![];
+        let summary = format_health_timing_summary(&results);
+        assert!(summary.is_empty());
+    }
+
+    #[test]
+    fn test_format_health_timing_summary_single_check() {
+        let results = vec![(
+            "cargo build",
+            true,
+            "ok (1.2s)".to_string(),
+            String::new(),
+            std::time::Duration::from_millis(1200),
+        )];
+        let summary = format_health_timing_summary(&results);
+        assert!(summary.contains("Health check completed in"));
+        assert!(summary.contains("cargo build:"));
+    }
+
+    #[test]
+    fn test_format_health_timing_summary_multiple_checks() {
+        let results = vec![
+            (
+                "cargo build",
+                true,
+                "ok (2.0s)".to_string(),
+                String::new(),
+                std::time::Duration::from_millis(2000),
+            ),
+            (
+                "cargo test",
+                true,
+                "ok (3.5s)".to_string(),
+                String::new(),
+                std::time::Duration::from_millis(3500),
+            ),
+            (
+                "cargo clippy",
+                false,
+                "FAIL (1.0s)".to_string(),
+                "→ 2 clippy".to_string(),
+                std::time::Duration::from_millis(1000),
+            ),
+        ];
+        let summary = format_health_timing_summary(&results);
+        // Total should be ~6.5s
+        assert!(summary.contains("Health check completed in 6.5s"));
+        assert!(summary.contains("cargo build: 2.0s"));
+        assert!(summary.contains("cargo test: 3.5s"));
+        assert!(summary.contains("cargo clippy: 1.0s"));
     }
 
     // ── parse_test_summary tests ──────────────────────────────────────
