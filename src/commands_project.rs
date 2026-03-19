@@ -918,6 +918,21 @@ pub async fn handle_fix(
     if !all_categories.is_empty() {
         append_error_log(&all_categories, "fix");
         record_fix_pending(&all_categories);
+        // Check for recurring errors and auto-generate hypotheses
+        let log_content = std::fs::read_to_string(".yoyo/error_log.jsonl").unwrap_or_default();
+        let log_entries = parse_error_log(&log_content);
+        let recurring = detect_recurring_errors(&log_entries);
+        for (cat, count) in &recurring {
+            let hypothesis = format!(
+                "{} errors have occurred {} times without resolution — likely a systemic issue",
+                cat, count
+            );
+            let testable = format!(
+                "Check if the {} pattern has a common root cause across occurrences",
+                cat
+            );
+            append_hypothesis(cat, &hypothesis, &testable);
+        }
     }
     println!("\n{YELLOW}  Sending {fail_count} failure(s) to AI for fixing...{RESET}\n");
     let fix_prompt = build_fix_prompt(&failures);
@@ -1979,6 +1994,139 @@ pub fn handle_errors() {
     let content = std::fs::read_to_string(path).unwrap_or_default();
     let entries = parse_error_log(&content);
     let display = format_errors_display(&entries);
+    println!("{DIM}{display}{RESET}\n");
+}
+
+// ── /hypotheses ─────────────────────────────────────────────────────────
+
+/// A hypothesis about a persistent error.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Hypothesis {
+    pub ts: String,
+    pub day: u32,
+    pub error_category: String,
+    pub hypothesis: String,
+    pub testable_by: String,
+}
+
+/// Append a hypothesis to `.yoyo/hypotheses.jsonl`.
+pub fn append_hypothesis(error_category: &str, hypothesis: &str, testable_by: &str) {
+    let yoyo_dir = std::path::Path::new(".yoyo");
+    if !yoyo_dir.exists() {
+        let _ = std::fs::create_dir_all(yoyo_dir);
+    }
+    let day = std::fs::read_to_string("DAY_COUNT")
+        .ok()
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .unwrap_or(0);
+    let ts = {
+        use std::time::SystemTime;
+        let dur = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default();
+        let secs = dur.as_secs();
+        let days_since_epoch = secs / 86400;
+        let time_of_day = secs % 86400;
+        let hours = time_of_day / 3600;
+        let minutes = (time_of_day % 3600) / 60;
+        let seconds = time_of_day % 60;
+        let (y, m, d) = civil_from_days(days_since_epoch as i64);
+        format!(
+            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+            y, m, d, hours, minutes, seconds
+        )
+    };
+    // Escape any quotes in the strings
+    let hyp_escaped = hypothesis.replace('"', "\\\"");
+    let test_escaped = testable_by.replace('"', "\\\"");
+    let cat_escaped = error_category.replace('"', "\\\"");
+    let line = format!(
+        "{{\"ts\":\"{}\",\"day\":{},\"error_category\":\"{}\",\"hypothesis\":\"{}\",\"testable_by\":\"{}\"}}",
+        ts, day, cat_escaped, hyp_escaped, test_escaped
+    );
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(".yoyo/hypotheses.jsonl")
+    {
+        let _ = writeln!(f, "{}", line);
+    }
+}
+
+/// Parse hypotheses from JSONL content.
+pub fn parse_hypotheses(content: &str) -> Vec<Hypothesis> {
+    content
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .filter_map(|line| {
+            let ts = extract_json_string(line, "ts")?;
+            let day = extract_json_number(line, "day")?;
+            let error_category = extract_json_string(line, "error_category")?;
+            let hypothesis = extract_json_string(line, "hypothesis")?;
+            let testable_by = extract_json_string(line, "testable_by")?;
+            Some(Hypothesis {
+                ts,
+                day,
+                error_category,
+                hypothesis,
+                testable_by,
+            })
+        })
+        .collect()
+}
+
+/// Format the /hypotheses display output.
+pub fn format_hypotheses_display(hypotheses: &[Hypothesis]) -> String {
+    if hypotheses.is_empty() {
+        return "  No failure hypotheses recorded yet.\n  Hypotheses are generated when recurring errors are detected.\n"
+            .to_string();
+    }
+    let mut out = String::new();
+    out.push_str(&format!(
+        "  Failure hypotheses ({} recorded):\n\n",
+        hypotheses.len()
+    ));
+    for (i, h) in hypotheses.iter().rev().take(10).enumerate() {
+        out.push_str(&format!(
+            "  {}. [Day {} — {}] {}\n     Hypothesis: {}\n     Test by: {}\n\n",
+            i + 1,
+            h.day,
+            h.error_category,
+            h.ts,
+            h.hypothesis,
+            h.testable_by,
+        ));
+    }
+    out
+}
+
+/// Detect recurring errors from the error log and generate hypotheses.
+/// Returns hypotheses for error categories that appear in 2+ unresolved entries.
+pub fn detect_recurring_errors(entries: &[ErrorLogEntry]) -> Vec<(String, usize)> {
+    let mut unresolved_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for entry in entries {
+        if entry.resolved != Some(true) {
+            for (cat, _) in &entry.categories {
+                *unresolved_counts.entry(cat.clone()).or_insert(0) += 1;
+            }
+        }
+    }
+    let mut recurring: Vec<(String, usize)> = unresolved_counts
+        .into_iter()
+        .filter(|(_, count)| *count >= 2)
+        .collect();
+    recurring.sort_by(|a, b| b.1.cmp(&a.1));
+    recurring
+}
+
+/// Handle the /hypotheses command.
+pub fn handle_hypotheses() {
+    let path = std::path::Path::new(".yoyo/hypotheses.jsonl");
+    let content = std::fs::read_to_string(path).unwrap_or_default();
+    let hypotheses = parse_hypotheses(&content);
+    let display = format_hypotheses_display(&hypotheses);
     println!("{DIM}{display}{RESET}\n");
 }
 

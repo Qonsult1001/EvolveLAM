@@ -429,6 +429,10 @@ pub async fn run_repl(
                 commands::handle_stats();
                 continue;
             }
+            "/hypotheses" => {
+                commands::handle_hypotheses();
+                continue;
+            }
             "/test" => {
                 commands::handle_test();
                 continue;

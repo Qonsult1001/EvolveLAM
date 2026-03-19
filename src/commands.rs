@@ -65,6 +65,7 @@ pub const KNOWN_COMMANDS: &[&str] = &[
     "/coupling",
     "/errors",
     "/stats",
+    "/hypotheses",
 ];
 
 /// Well-known model names for `/model <Tab>` completion.
@@ -537,8 +538,8 @@ pub use crate::commands_git::{
 // Project-related handlers
 pub use crate::commands_project::{
     handle_ast, handle_context, handle_coupling, handle_docs, handle_errors, handle_find,
-    handle_fix, handle_health, handle_index, handle_init, handle_lint, handle_run,
-    handle_run_usage, handle_test, handle_tree,
+    handle_fix, handle_health, handle_hypotheses, handle_index, handle_init, handle_lint,
+    handle_run, handle_run_usage, handle_test, handle_tree,
 };
 
 // Session-related handlers
@@ -978,14 +979,15 @@ mod tests {
     use crate::commands_project::{
         build_commands_for_project, build_fix_prompt, build_project_tree, classify_failure_oneline,
         classify_rust_error, compute_fix_rates, detect_project_name, detect_project_type,
-        extract_first_meaningful_line, find_files, fix_strategy, format_error_classification,
-        format_errors_display, format_health_timing_summary, format_project_index,
-        format_tree_from_paths, fuzzy_score, generate_init_content, health_checks_for_project,
-        highlight_match, is_binary_extension, lint_command_for_project, parse_error_log,
-        parse_test_summary, run_health_check_for_project, run_health_checks_full_output,
+        detect_recurring_errors, extract_first_meaningful_line, find_files, fix_strategy,
+        format_error_classification, format_errors_display, format_health_timing_summary,
+        format_hypotheses_display, format_project_index, format_tree_from_paths, fuzzy_score,
+        generate_init_content, health_checks_for_project, highlight_match, is_binary_extension,
+        lint_command_for_project, parse_error_log, parse_hypotheses, parse_test_summary,
+        run_health_check_for_project, run_health_checks_full_output,
         run_health_checks_with_classification, run_shell_command, scan_important_dirs,
         scan_important_files, summarize_error_log, test_command_for_project, ErrorLogEntry,
-        IndexEntry, ProjectType, RustErrorCategory, TestSummary,
+        Hypothesis, IndexEntry, ProjectType, RustErrorCategory, TestSummary,
     };
     use crate::commands_session::{parse_bookmark_name, parse_spawn_task, Bookmarks};
     use crate::memory::{
@@ -3929,5 +3931,91 @@ test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
         // Recent events should show ✓ and ✗ markers
         assert!(display.contains("✓"));
         assert!(display.contains("✗"));
+    }
+
+    // ── Hypothesis tests ────────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_hypotheses_basic() {
+        let line = r#"{"ts":"2026-03-19T08:00:00Z","day":19,"error_category":"borrow_checker","hypothesis":"Recurring borrow issue","testable_by":"Check ownership flow"}"#;
+        let hypotheses = parse_hypotheses(line);
+        assert_eq!(hypotheses.len(), 1);
+        assert_eq!(hypotheses[0].error_category, "borrow_checker");
+        assert_eq!(hypotheses[0].hypothesis, "Recurring borrow issue");
+        assert_eq!(hypotheses[0].testable_by, "Check ownership flow");
+    }
+
+    #[test]
+    fn test_parse_hypotheses_empty() {
+        assert!(parse_hypotheses("").is_empty());
+        assert!(parse_hypotheses("\n\n").is_empty());
+    }
+
+    #[test]
+    fn test_detect_recurring_errors_finds_patterns() {
+        let entries = vec![
+            ErrorLogEntry {
+                ts: "t1".to_string(),
+                day: 19,
+                categories: vec![("borrow_checker".to_string(), 1)],
+                source: "fix".to_string(),
+                resolved: Some(false),
+            },
+            ErrorLogEntry {
+                ts: "t2".to_string(),
+                day: 19,
+                categories: vec![("borrow_checker".to_string(), 1)],
+                source: "fix".to_string(),
+                resolved: Some(false),
+            },
+        ];
+        let recurring = detect_recurring_errors(&entries);
+        assert_eq!(recurring.len(), 1);
+        assert_eq!(recurring[0].0, "borrow_checker");
+        assert_eq!(recurring[0].1, 2);
+    }
+
+    #[test]
+    fn test_detect_recurring_errors_ignores_resolved() {
+        let entries = vec![
+            ErrorLogEntry {
+                ts: "t1".to_string(),
+                day: 19,
+                categories: vec![("borrow_checker".to_string(), 1)],
+                source: "fix".to_string(),
+                resolved: Some(true),
+            },
+            ErrorLogEntry {
+                ts: "t2".to_string(),
+                day: 19,
+                categories: vec![("borrow_checker".to_string(), 1)],
+                source: "fix".to_string(),
+                resolved: Some(true),
+            },
+        ];
+        let recurring = detect_recurring_errors(&entries);
+        assert!(recurring.is_empty());
+    }
+
+    #[test]
+    fn test_format_hypotheses_display_empty() {
+        let display = format_hypotheses_display(&[]);
+        assert!(display.contains("No failure hypotheses"));
+    }
+
+    #[test]
+    fn test_format_hypotheses_display_shows_entries() {
+        let hypotheses = vec![Hypothesis {
+            ts: "2026-03-19T08:00:00Z".to_string(),
+            day: 19,
+            error_category: "borrow_checker".to_string(),
+            hypothesis: "Recurring issue".to_string(),
+            testable_by: "Check ownership".to_string(),
+        }];
+        let display = format_hypotheses_display(&hypotheses);
+        assert!(display.contains("1 recorded"));
+        assert!(display.contains("borrow_checker"));
+        assert!(display.contains("Recurring issue"));
+        assert!(display.contains("Check ownership"));
     }
 }
