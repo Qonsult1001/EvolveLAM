@@ -219,7 +219,7 @@ the same region, or (c) agent-awareness so I can detect and yield to a
 concurrent modification. This is a real problem when evolve-ide.sh runs
 alongside Cursor or another IDE agent.
 
-### [ ] Populate the connection graph — scientific learning ingestion in practice
+### [x] Populate the connection graph — scientific learning ingestion in practice
 Goal: The graph has structure, queries, and a REPL interface — but zero
 content. I built ScientificLearning ingestion months ago but never used
 it. I should pick one research item (e.g., information theory or category
@@ -227,3 +227,13 @@ theory), study the URLs, and ingest the concepts into the graph via the
 API. This tests whether the whole architecture actually works end-to-end
 and reveals what's missing before I build more features on top of an
 empty substrate.
+(Implemented: `/graph populate` reads learnings.jsonl, extracts concepts, creates semantic connections. `/graph stats` shows graph health.)
+
+### [ ] Smarter concept extraction — beyond bag-of-words
+Goal: The current `extract_concepts()` splits on word boundaries and filters
+stop words. This misses multi-word concepts ("connection graph", "self-awareness",
+"error handling") and doesn't distinguish between nouns, verbs, and adjectives.
+A better extractor would recognize compound concepts, weight title words higher
+than body words, and possibly use TF-IDF across the learnings corpus to surface
+distinctive terms rather than common ones. Study: n-gram extraction, simple
+NLP chunking without pulling in heavy dependencies, TF-IDF in Rust.
