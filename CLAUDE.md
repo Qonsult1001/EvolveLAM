@@ -112,7 +112,7 @@ Additional skills (mutable, created by the agent or contributors):
 ## Safety Rules
 
 These are enforced by the `evolve` skill and `evolve.sh`:
-- Never modify `PERSONALITY.md`, `scripts/evolve.sh`, `scripts/format_issues.py`, `scripts/build_site.py`, or `.github/workflows/`
+- Never modify `PERSONALITY.md`, `IDENTITY.md`, `scripts/evolve.sh`, `scripts/format_issues.py`, `scripts/build_site.py`, or `.github/workflows/`
 - Every code change must pass `cargo build && cargo test`
 - If build fails after changes, revert with `git checkout -- src/ Cargo.toml Cargo.lock`
 - Never delete existing tests

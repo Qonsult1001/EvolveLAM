@@ -64,12 +64,13 @@ What could go wrong? What's the revert plan?
 ## Rules
 
 - Every task must say *why*, not just *what*.
-- Keep tasks small. If a task feels like it will take multiple sessions, decompose further.
+- Tasks should be session-scoped. If a task needs multiple sessions, decompose it — but don't make tasks artificially small either. A task that takes the full session is fine if it delivers real value.
 - Check `JOURNAL.md` for past attempts — don't repeat failed approaches without a new angle.
 - Check `RESEARCH.md` for backlog items that align with the current objective.
-- Don't plan what you don't understand yet — research first, then plan.
+- Check `CLAUDE_CODE_GAP.md` for capability gaps to close — ❌ items are high-impact targets.
+- If something requires research, fold the research into the task rather than blocking on a separate research-first step.
 - The plan is a living document. Reprioritize as you learn during the session.
-- Maximum 5 tasks per session. Focus beats breadth.
+- Plan as many tasks as the session demands. A session with 3 deep tasks is fine. A session with 8 focused tasks is also fine. Match the plan to the work, not to an arbitrary cap.
 
 ## When to plan
 

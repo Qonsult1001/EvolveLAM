@@ -52,7 +52,7 @@ Before adding any crate:
 
 - Never delete existing tests.
 - Never modify protected files (PERSONALITY.md, scripts/evolve.sh, .github/workflows/, etc.).
-- If build fails after 3 attempts, revert with `git checkout -- src/ Cargo.toml Cargo.lock`.
+- If build fails, use the debug skill to diagnose root cause. Revert with `git checkout -- src/ Cargo.toml Cargo.lock` only as a last resort when you've exhausted your understanding of the error.
 - Keep changes focused. One feature or fix per commit.
 - Don't refactor surrounding code unless the plan calls for it.
 

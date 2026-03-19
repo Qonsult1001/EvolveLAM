@@ -75,10 +75,13 @@ RUST_BACKTRACE=1 cargo run 2>&1
 2. **Check JOURNAL.md** — Have you hit this before?
 3. **Simplify** — Remove complexity until the error goes away, then add back piece by piece.
 4. **Research** — If the error is unfamiliar, use the research skill to look it up.
-5. **Revert and try again** — If you've been stuck for 3+ attempts:
+5. **Try a different approach** — If the same fix isn't working, step back and reconsider the design. Sometimes the right fix is architectural, not syntactic.
+6. **Revert as a last resort** — Only when you've genuinely exhausted your understanding:
    ```bash
    git checkout -- src/ Cargo.toml Cargo.lock
    ```
+
+   But journal *why* you reverted — that's a learning for next session.
 
 ## Rules
 

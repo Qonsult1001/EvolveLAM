@@ -1130,6 +1130,103 @@ impl ConnectionGraph {
             isolated_count,
         }
     }
+
+    /// Detect communities using label propagation.
+    ///
+    /// Each node starts with its own label. Iteratively, each node adopts the
+    /// label most common among its neighbors (weighted by edge weight).
+    /// Converges when no node changes label, or after max_iterations.
+    ///
+    /// Returns a map from community label to list of member concepts.
+    pub fn detect_communities(&self, max_iterations: usize) -> Vec<(String, Vec<String>)> {
+        // Collect all nodes
+        let mut all_nodes: Vec<String> = Vec::new();
+        let mut node_set: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for (src, edges) in &self.edges {
+            if node_set.insert(src.clone()) {
+                all_nodes.push(src.clone());
+            }
+            for conn in edges {
+                if node_set.insert(conn.to.clone()) {
+                    all_nodes.push(conn.to.clone());
+                }
+            }
+        }
+
+        if all_nodes.is_empty() {
+            return Vec::new();
+        }
+
+        // Initialize: each node is its own label
+        let mut labels: HashMap<String, String> =
+            all_nodes.iter().map(|n| (n.clone(), n.clone())).collect();
+
+        // Build adjacency list with weights
+        let mut adjacency: HashMap<String, Vec<(String, f64)>> = HashMap::new();
+        for edges in self.edges.values() {
+            for conn in edges {
+                adjacency
+                    .entry(conn.from.clone())
+                    .or_default()
+                    .push((conn.to.clone(), conn.weight));
+                adjacency
+                    .entry(conn.to.clone())
+                    .or_default()
+                    .push((conn.from.clone(), conn.weight));
+            }
+        }
+
+        // Iterate
+        for _ in 0..max_iterations {
+            let mut changed = false;
+            for node in &all_nodes {
+                let neighbors = match adjacency.get(node) {
+                    Some(n) => n,
+                    None => continue,
+                };
+                if neighbors.is_empty() {
+                    continue;
+                }
+                // Count weighted votes per label
+                let mut label_weights: HashMap<String, f64> = HashMap::new();
+                for (neighbor, weight) in neighbors {
+                    let neighbor_label = labels.get(neighbor).cloned().unwrap_or_default();
+                    *label_weights.entry(neighbor_label).or_insert(0.0) += weight;
+                }
+                // Pick the label with highest total weight
+                if let Some((best_label, _)) = label_weights
+                    .iter()
+                    .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                {
+                    let current = labels.get(node).cloned().unwrap_or_default();
+                    if *best_label != current {
+                        labels.insert(node.clone(), best_label.clone());
+                        changed = true;
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+
+        // Group nodes by label
+        let mut communities: HashMap<String, Vec<String>> = HashMap::new();
+        for (node, label) in &labels {
+            communities
+                .entry(label.clone())
+                .or_default()
+                .push(node.clone());
+        }
+
+        // Sort communities by size (largest first), sort members within each
+        let mut result: Vec<(String, Vec<String>)> = communities.into_iter().collect();
+        for (_, members) in &mut result {
+            members.sort();
+        }
+        result.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+        result
+    }
 }
 
 /// Summary statistics for the connection graph.
@@ -2134,5 +2231,65 @@ mod tests {
     fn test_load_learnings_missing_file() {
         let learnings = load_learnings_from(Path::new("/nonexistent/path.jsonl"));
         assert!(learnings.is_empty());
+    }
+
+    // ── Community detection tests ───────────────────────────────────────
+
+    #[test]
+    fn test_detect_communities_empty_graph() {
+        let graph = ConnectionGraph::default();
+        let communities = graph.detect_communities(10);
+        assert!(communities.is_empty());
+    }
+
+    #[test]
+    fn test_detect_communities_two_clusters() {
+        let mut graph = ConnectionGraph::default();
+        // Cluster 1: a-b-c (strongly connected)
+        graph.activate_connection("a", "b", ConnectionKind::Semantic);
+        graph.activate_connection("b", "c", ConnectionKind::Semantic);
+        graph.activate_connection("a", "c", ConnectionKind::Semantic);
+        // Cluster 2: x-y-z (strongly connected)
+        graph.activate_connection("x", "y", ConnectionKind::Semantic);
+        graph.activate_connection("y", "z", ConnectionKind::Semantic);
+        graph.activate_connection("x", "z", ConnectionKind::Semantic);
+
+        let communities = graph.detect_communities(20);
+        // Should find at least 2 communities (disconnected components)
+        assert!(communities.len() >= 2);
+        // Each community should have 3 members
+        let sizes: Vec<usize> = communities.iter().map(|(_, m)| m.len()).collect();
+        assert!(sizes.contains(&3));
+    }
+
+    #[test]
+    fn test_detect_communities_single_cluster() {
+        let mut graph = ConnectionGraph::default();
+        graph.activate_connection("a", "b", ConnectionKind::Semantic);
+        graph.activate_connection("b", "c", ConnectionKind::Semantic);
+
+        let communities = graph.detect_communities(20);
+        // All nodes should converge to one community
+        let non_singleton: Vec<_> = communities.iter().filter(|(_, m)| m.len() > 1).collect();
+        assert!(!non_singleton.is_empty());
+        // Total nodes across all communities = 3
+        let total: usize = communities.iter().map(|(_, m)| m.len()).sum();
+        assert_eq!(total, 3);
+    }
+
+    #[test]
+    fn test_detect_communities_respects_weights() {
+        let mut graph = ConnectionGraph::default();
+        // Strong cluster: a-b (activate multiple times for higher weight)
+        graph.activate_connection("a", "b", ConnectionKind::Semantic);
+        graph.activate_connection("a", "b", ConnectionKind::Semantic);
+        graph.activate_connection("a", "b", ConnectionKind::Semantic);
+        // Weak bridge: b-c
+        graph.activate_connection("b", "c", ConnectionKind::Semantic);
+
+        let communities = graph.detect_communities(20);
+        // Should have communities, total 3 nodes
+        let total: usize = communities.iter().map(|(_, m)| m.len()).sum();
+        assert_eq!(total, 3);
     }
 }

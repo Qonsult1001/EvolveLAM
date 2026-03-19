@@ -670,6 +670,8 @@ pub fn handle_graph(input: &str) {
         handle_graph_populate();
     } else if rest == "stats" || rest.starts_with("stats ") {
         handle_graph_stats();
+    } else if rest == "communities" || rest.starts_with("communities ") {
+        handle_graph_communities();
     } else {
         print_graph_help();
     }
@@ -683,7 +685,10 @@ fn print_graph_help() {
     println!("         /graph search <query>        Search concepts by substring");
     println!("         /graph path <from> <to>      Shortest path between concepts");
     println!("         /graph populate              Populate graph from learnings.jsonl");
-    println!("         /graph stats                 Show detailed graph health metrics{RESET}\n");
+    println!(
+        "         /graph stats                 Show detailed graph health metrics
+         /graph communities           Detect concept clusters via label propagation{RESET}\n"
+    );
 }
 
 fn handle_graph_downstream(concept: &str) {
@@ -949,6 +954,34 @@ fn handle_graph_stats() {
         );
     }
     println!();
+}
+
+fn handle_graph_communities() {
+    let graph = crate::memory::ConnectionGraph::load();
+    if graph.edges.is_empty() {
+        println!("{DIM}  Connection graph is empty. Run /graph populate to seed it.{RESET}\n");
+        return;
+    }
+    let communities = graph.detect_communities(20);
+    if communities.is_empty() {
+        println!("{DIM}  No communities detected.{RESET}\n");
+        return;
+    }
+    println!("  Concept Communities ({} clusters):\n", communities.len());
+    for (i, (label, members)) in communities.iter().enumerate() {
+        if members.len() == 1 {
+            continue; // Skip singletons
+        }
+        println!("  {}. {} ({} members)", i + 1, label, members.len());
+        for member in members.iter().take(15) {
+            let marker = if member == label { " ◆" } else { "" };
+            println!("     - {member}{marker}");
+        }
+        if members.len() > 15 {
+            println!("     ... and {} more", members.len() - 15);
+        }
+        println!();
+    }
 }
 
 fn handle_graph_search(query: &str) {

@@ -19,7 +19,7 @@
 #   ./scripts/evolve-ide.sh all          # Outputs all prompts sequentially
 #
 # Environment:
-#   TIMEOUT   — Planning phase time budget in seconds (default: 600)
+#   TIMEOUT   — Planning phase time budget in seconds (default: 1200)
 #   REPO      — GitHub repo (default: yologdev/yoyo-evolve)
 #   BRANCH    — Git branch to push to (default: current branch)
 
@@ -74,7 +74,7 @@ fi
 
 REPO="${REPO:-Qonsult1001/EvolveLAM}"
 BRANCH="${BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
-TIMEOUT="${TIMEOUT:-600}"
+TIMEOUT="${TIMEOUT:-1200}"
 BIRTH_DATE="2026-02-28"
 DATE=$(date +%Y-%m-%d)
 SESSION_TIME=$(date +%H:%M)
@@ -372,9 +372,10 @@ and Urgency (high/medium/low). Work the quadrant — high-impact + high-urgency 
 Priority: CI fix > capability gaps > bugs > UX > help-wanted replies > self-issues > community > competitiveness.
 
 You MUST address ALL community issues (implement/wontfix/partial/reply).
-Plan up to 5 tasks. Be ambitious — each task should be a meaningful step toward becoming
-a better coding agent. Don't limit yourself to trivial fixes when there are real capability
-gaps to close. Decompose large goals into concrete, single-session tasks.
+Plan as many tasks as the session demands — no artificial cap. Each task should be a
+meaningful step toward becoming a better coding agent. Don't limit yourself to trivial
+fixes when there are real capability gaps to close. Be ambitious. A session with 3 deep
+tasks or 8 focused tasks are both valid — match the plan to the work.
 
 Write SESSION_PLAN.md with EXACTLY this format:
 
@@ -513,7 +514,7 @@ phase_verify_task() {
     # Check 1: Protected files (committed + staged + unstaged)
     PROTECTED_CHANGES=""
     if ! PROTECTED_CHANGES=$(git diff --name-only "$PRE_TASK_SHA"..HEAD -- \
-        .github/workflows/ PERSONALITY.md \
+        .github/workflows/ PERSONALITY.md IDENTITY.md \
         scripts/evolve.sh scripts/format_issues.py scripts/build_site.py \
         skills/self-assess/ skills/evolve/ skills/communicate/ skills/research/ 2>&1); then
         echo "  BLOCKED: git diff failed"
@@ -550,19 +551,48 @@ phase_verify_task() {
         REVERT_REASON="Modified protected files: $PROTECTED_CHANGES"
     fi
 
-    # Check 2: Build + tests
+    # Check 2: Build + tests (with retry — write fix prompt on first failure)
     if [ "$TASK_OK" = true ]; then
-        if ! BUILD_OUT=$(cargo build 2>&1); then
-            echo "  BLOCKED: Build failed"
-            echo "$BUILD_OUT" | tail -20 | sed 's/^/    /'
-            TASK_OK=false
-            REVERT_REASON="Build failed"
-        elif ! TEST_OUT=$(cargo test 2>&1); then
-            echo "  BLOCKED: Tests failed"
-            echo "$TEST_OUT" | tail -20 | sed 's/^/    /'
-            TASK_OK=false
-            REVERT_REASON="Tests failed"
-        fi
+        VERIFY_ATTEMPTS="${VERIFY_ATTEMPTS:-2}"
+        for VERIFY_ROUND in $(seq 1 $VERIFY_ATTEMPTS); do
+            BUILD_PASS=true
+            if ! BUILD_OUT=$(cargo build 2>&1); then
+                BUILD_PASS=false
+                REVERT_REASON="Build failed"
+                echo "  Build failed (attempt $VERIFY_ROUND/$VERIFY_ATTEMPTS)"
+                echo "$BUILD_OUT" | tail -20 | sed 's/^/    /'
+            elif ! TEST_OUT=$(cargo test 2>&1); then
+                BUILD_PASS=false
+                REVERT_REASON="Tests failed"
+                echo "  Tests failed (attempt $VERIFY_ROUND/$VERIFY_ATTEMPTS)"
+                echo "$TEST_OUT" | tail -20 | sed 's/^/    /'
+            fi
+
+            if [ "$BUILD_PASS" = true ]; then
+                break
+            fi
+
+            if [ "$VERIFY_ROUND" -lt "$VERIFY_ATTEMPTS" ]; then
+                # Write a fix prompt for the IDE agent to act on before final attempt
+                ERRORS="${BUILD_OUT:-}${TEST_OUT:-}"
+                cat > "$EVOLVE_DIR/verify_fix_prompt.md" <<VFEOF
+Build/test verification failed for Task $CURRENT_TASK. Fix these errors NOW:
+
+$(echo "$ERRORS" | tail -30)
+
+Steps:
+1. Read the error output above
+2. Fix the root cause in the relevant source files
+3. Run: cargo fmt && cargo clippy --all-targets -- -D warnings && cargo build && cargo test
+4. Commit the fix: git add -A && git commit -m "Day $DAY ($SESSION_TIME): fix task $CURRENT_TASK build errors"
+VFEOF
+                echo "  Fix prompt written to $EVOLVE_DIR/verify_fix_prompt.md"
+                echo "  ACTION NEEDED: Read it, fix the errors, then re-run: ./scripts/evolve-ide.sh verify-task"
+                return 1
+            else
+                TASK_OK=false
+            fi
+        done
     fi
 
     # Revert if verification failed
@@ -1026,8 +1056,8 @@ Note friction, bugs, gaps, and opportunities as you read.
 
 Act on the planning prompt below. Your deliverable is SESSION_PLAN.md.
 Use the plan skill's prioritization framework (Impact × Urgency). Be ambitious —
-plan up to 5 meaningful tasks. Don't settle for trivial fixes when there are real
-capability gaps to close.
+plan as many tasks as the session demands. No artificial cap. Don't settle for
+trivial fixes when there are real capability gaps to close.
 Commit it when done: git add SESSION_PLAN.md && git commit -m "Day N (HH:MM): session plan"
 
 RUNBOOK_HEADER
