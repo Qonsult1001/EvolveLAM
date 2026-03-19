@@ -799,6 +799,14 @@ pub fn format_stats_display(journal_stats: &JournalStats, error_content: &str) -
         }
     }
 
+    // Task outcomes
+    let outcome_content = std::fs::read_to_string(".yoyo/task_outcomes.jsonl").unwrap_or_default();
+    let outcomes = parse_task_outcomes(&outcome_content);
+    if !outcomes.is_empty() {
+        out.push('\n');
+        out.push_str(&format_task_outcome_stats(&outcomes));
+    }
+
     out
 }
 
@@ -1389,6 +1397,87 @@ pub fn handle_timing() {
     println!("{DIM}{display}{RESET}\n");
 }
 
+// ── Task outcome tracking ───────────────────────────────────────────────
+
+pub struct TaskOutcome {
+    pub day: u32,
+    #[allow(dead_code)]
+    pub task_num: u32,
+    #[allow(dead_code)]
+    pub title: String,
+    pub outcome: String, // "verified" or "reverted"
+}
+
+pub fn parse_task_outcomes(content: &str) -> Vec<TaskOutcome> {
+    let mut entries = Vec::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let day = extract_timing_u32(line, "day").unwrap_or(0);
+        let task_num = extract_timing_u32(line, "task_num").unwrap_or(0);
+        let title = extract_timing_string(line, "title").unwrap_or_default();
+        let outcome = extract_timing_string(line, "outcome").unwrap_or_default();
+
+        if !outcome.is_empty() {
+            entries.push(TaskOutcome {
+                day,
+                task_num,
+                title,
+                outcome,
+            });
+        }
+    }
+    entries
+}
+
+pub fn format_task_outcome_stats(outcomes: &[TaskOutcome]) -> String {
+    let mut out = String::new();
+    if outcomes.is_empty() {
+        out.push_str("  No task outcome data recorded.\n");
+        return out;
+    }
+
+    let verified = outcomes.iter().filter(|o| o.outcome == "verified").count();
+    let reverted = outcomes.iter().filter(|o| o.outcome == "reverted").count();
+    let total = outcomes.len();
+    let success_rate = if total > 0 {
+        (verified as f64 / total as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    out.push_str("  Task Outcomes:\n");
+    out.push_str(&format!(
+        "    Total: {} | Verified: {} | Reverted: {} | Success: {:.0}%\n",
+        total, verified, reverted, success_rate
+    ));
+
+    // Per-day breakdown
+    let mut days: std::collections::BTreeMap<u32, (u32, u32)> = std::collections::BTreeMap::new();
+    for o in outcomes {
+        let entry = days.entry(o.day).or_insert((0, 0));
+        if o.outcome == "verified" {
+            entry.0 += 1;
+        } else {
+            entry.1 += 1;
+        }
+    }
+
+    if days.len() > 1 {
+        out.push_str("\n    Per day:\n");
+        for (day, (v, r)) in &days {
+            out.push_str(&format!(
+                "      Day {}: {} verified, {} reverted\n",
+                day, v, r
+            ));
+        }
+    }
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1776,5 +1865,59 @@ mod tests {
         assert!(display.contains("2 sessions"));
         assert!(display.contains("Average duration: 15m00s"));
         assert!(display.contains("8 completed, 1 reverted"));
+    }
+
+    // ── Task outcome tests ─────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_task_outcomes_basic() {
+        let content = r#"{"day":19,"task_num":1,"title":"Extract module","outcome":"verified"}
+{"day":19,"task_num":2,"title":"Add command","outcome":"reverted"}"#;
+        let outcomes = parse_task_outcomes(content);
+        assert_eq!(outcomes.len(), 2);
+        assert_eq!(outcomes[0].outcome, "verified");
+        assert_eq!(outcomes[0].task_num, 1);
+        assert_eq!(outcomes[1].outcome, "reverted");
+    }
+
+    #[test]
+    fn test_parse_task_outcomes_empty() {
+        assert!(parse_task_outcomes("").is_empty());
+        assert!(parse_task_outcomes("\n\n").is_empty());
+    }
+
+    #[test]
+    fn test_format_task_outcome_stats() {
+        let outcomes = vec![
+            TaskOutcome {
+                day: 19,
+                task_num: 1,
+                title: "t1".to_string(),
+                outcome: "verified".to_string(),
+            },
+            TaskOutcome {
+                day: 19,
+                task_num: 2,
+                title: "t2".to_string(),
+                outcome: "verified".to_string(),
+            },
+            TaskOutcome {
+                day: 19,
+                task_num: 3,
+                title: "t3".to_string(),
+                outcome: "reverted".to_string(),
+            },
+        ];
+        let display = format_task_outcome_stats(&outcomes);
+        assert!(display.contains("Total: 3"));
+        assert!(display.contains("Verified: 2"));
+        assert!(display.contains("Reverted: 1"));
+        assert!(display.contains("67%"));
+    }
+
+    #[test]
+    fn test_format_task_outcome_stats_empty() {
+        let display = format_task_outcome_stats(&[]);
+        assert!(display.contains("No task outcome data"));
     }
 }
