@@ -454,8 +454,8 @@ pub async fn run_repl(
                 commands::handle_blame(input);
                 continue;
             }
-            "/runtime-errors" => {
-                commands::handle_runtime_errors();
+            s if s == "/runtime-errors" || s.starts_with("/runtime-errors ") => {
+                commands::handle_runtime_errors(input);
                 continue;
             }
             "/test" => {

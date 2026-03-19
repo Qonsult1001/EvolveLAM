@@ -2982,11 +2982,140 @@ pub fn format_runtime_errors_display(entries: &[RuntimeError]) -> String {
     out
 }
 
-/// Handle the /runtime-errors command.
-pub fn handle_runtime_errors() {
+/// A detected recurring error pattern.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RuntimeErrorPattern {
+    pub category: String,
+    pub message: String,
+    pub count: usize,
+    pub first_seen: String,
+    pub last_seen: String,
+}
+
+/// Detect recurring patterns in runtime errors.
+/// A pattern is a (category, message) pair that appears `min_count` or more times.
+pub fn detect_runtime_error_patterns(
+    entries: &[RuntimeError],
+    min_count: usize,
+) -> Vec<RuntimeErrorPattern> {
+    let mut counts: std::collections::HashMap<(&str, &str), (usize, &str, &str)> =
+        std::collections::HashMap::new();
+    for e in entries {
+        let key = (e.category.as_str(), e.message.as_str());
+        let entry = counts
+            .entry(key)
+            .or_insert((0, e.ts.as_str(), e.ts.as_str()));
+        entry.0 += 1;
+        // Update first_seen if earlier
+        if e.ts.as_str() < entry.1 {
+            entry.1 = e.ts.as_str();
+        }
+        // Update last_seen if later
+        if e.ts.as_str() > entry.2 {
+            entry.2 = e.ts.as_str();
+        }
+    }
+
+    let mut patterns: Vec<RuntimeErrorPattern> = counts
+        .into_iter()
+        .filter(|(_, (count, _, _))| *count >= min_count)
+        .map(|((cat, msg), (count, first, last))| RuntimeErrorPattern {
+            category: cat.to_string(),
+            message: msg.to_string(),
+            count,
+            first_seen: first.to_string(),
+            last_seen: last.to_string(),
+        })
+        .collect();
+
+    patterns.sort_by(|a, b| b.count.cmp(&a.count));
+    patterns
+}
+
+/// Format detected runtime error patterns for display.
+pub fn format_runtime_error_patterns(patterns: &[RuntimeErrorPattern]) -> String {
+    if patterns.is_empty() {
+        return "  No recurring patterns detected (threshold: 3+ occurrences).\n".to_string();
+    }
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "  Recurring error patterns ({} detected):\n\n",
+        patterns.len()
+    ));
+
+    for p in patterns {
+        let msg_preview = if p.message.len() > 80 {
+            format!("{}…", &p.message[..79])
+        } else {
+            p.message.clone()
+        };
+        out.push_str(&format!(
+            "    {} × {} — {}\n",
+            p.count, p.category, msg_preview
+        ));
+        out.push_str(&format!(
+            "      first: {}  last: {}\n",
+            &p.first_seen[..10.min(p.first_seen.len())],
+            &p.last_seen[..10.min(p.last_seen.len())]
+        ));
+    }
+
+    out
+}
+
+/// Handle the /runtime-errors command with optional subcommands.
+pub fn handle_runtime_errors(input: &str) {
+    let arg = input.strip_prefix("/runtime-errors").unwrap_or("").trim();
+
     let path = std::path::Path::new(".yoyo/runtime_errors.jsonl");
     let content = std::fs::read_to_string(path).unwrap_or_default();
     let entries = parse_runtime_errors(&content);
-    let display = format_runtime_errors_display(&entries);
-    println!("\n{DIM}{display}{RESET}\n");
+
+    match arg {
+        "patterns" => {
+            let patterns = detect_runtime_error_patterns(&entries, 3);
+            let display = format_runtime_error_patterns(&patterns);
+            println!("\n{DIM}{display}{RESET}\n");
+        }
+        "summary" => {
+            if entries.is_empty() {
+                println!("{DIM}  No runtime errors logged.{RESET}\n");
+                return;
+            }
+            let mut by_category: std::collections::HashMap<&str, usize> =
+                std::collections::HashMap::new();
+            for e in &entries {
+                *by_category.entry(&e.category).or_default() += 1;
+            }
+            println!("\n{DIM}  Runtime errors: {} total\n", entries.len());
+            println!("  By category:");
+            let mut cats: Vec<_> = by_category.iter().collect();
+            cats.sort_by(|a, b| b.1.cmp(a.1));
+            for (cat, count) in &cats {
+                println!("    {cat:<20} {count}");
+            }
+            println!("{RESET}\n");
+        }
+        "clear" => {
+            if entries.is_empty() {
+                println!("{DIM}  No runtime errors to clear.{RESET}\n");
+                return;
+            }
+            match std::fs::write(path, "") {
+                Ok(_) => println!(
+                    "{GREEN}  ✓ Cleared {} runtime error entries.{RESET}\n",
+                    entries.len()
+                ),
+                Err(e) => eprintln!("{RED}  error clearing runtime errors: {e}{RESET}\n"),
+            }
+        }
+        "" => {
+            let display = format_runtime_errors_display(&entries);
+            println!("\n{DIM}{display}{RESET}\n");
+        }
+        _ => {
+            println!("{DIM}  usage: /runtime-errors [patterns|summary|clear]{RESET}\n");
+        }
+    }
 }

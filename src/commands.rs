@@ -3503,4 +3503,119 @@ test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
         assert!(display.contains("api_error"));
         assert!(display.contains("list_files"));
     }
+
+    #[test]
+    fn test_detect_runtime_error_patterns_basic() {
+        use crate::commands_project::{detect_runtime_error_patterns, RuntimeError};
+        let entries = vec![
+            RuntimeError {
+                ts: "2026-03-19T10:00:00Z".into(),
+                category: "api_error".into(),
+                tool: None,
+                message: "connection refused".into(),
+            },
+            RuntimeError {
+                ts: "2026-03-19T10:01:00Z".into(),
+                category: "api_error".into(),
+                tool: None,
+                message: "connection refused".into(),
+            },
+            RuntimeError {
+                ts: "2026-03-19T10:02:00Z".into(),
+                category: "api_error".into(),
+                tool: None,
+                message: "connection refused".into(),
+            },
+            RuntimeError {
+                ts: "2026-03-19T10:03:00Z".into(),
+                category: "tool_failure".into(),
+                tool: Some("bash".into()),
+                message: "command failed".into(),
+            },
+        ];
+        let patterns = detect_runtime_error_patterns(&entries, 3);
+        assert_eq!(patterns.len(), 1);
+        assert_eq!(patterns[0].category, "api_error");
+        assert_eq!(patterns[0].message, "connection refused");
+        assert_eq!(patterns[0].count, 3);
+        assert_eq!(patterns[0].first_seen, "2026-03-19T10:00:00Z");
+        assert_eq!(patterns[0].last_seen, "2026-03-19T10:02:00Z");
+    }
+
+    #[test]
+    fn test_detect_runtime_error_patterns_empty() {
+        use crate::commands_project::detect_runtime_error_patterns;
+        let patterns = detect_runtime_error_patterns(&[], 3);
+        assert!(patterns.is_empty());
+    }
+
+    #[test]
+    fn test_detect_runtime_error_patterns_below_threshold() {
+        use crate::commands_project::{detect_runtime_error_patterns, RuntimeError};
+        let entries = vec![
+            RuntimeError {
+                ts: "2026-03-19T10:00:00Z".into(),
+                category: "api_error".into(),
+                tool: None,
+                message: "error A".into(),
+            },
+            RuntimeError {
+                ts: "2026-03-19T10:01:00Z".into(),
+                category: "api_error".into(),
+                tool: None,
+                message: "error B".into(),
+            },
+        ];
+        let patterns = detect_runtime_error_patterns(&entries, 3);
+        assert!(patterns.is_empty());
+    }
+
+    #[test]
+    fn test_detect_runtime_error_patterns_sorted_by_count() {
+        use crate::commands_project::{detect_runtime_error_patterns, RuntimeError};
+        let mut entries = Vec::new();
+        for _ in 0..5 {
+            entries.push(RuntimeError {
+                ts: "2026-03-19T10:00:00Z".into(),
+                category: "api_error".into(),
+                tool: None,
+                message: "five times".into(),
+            });
+        }
+        for _ in 0..3 {
+            entries.push(RuntimeError {
+                ts: "2026-03-19T10:00:00Z".into(),
+                category: "tool_failure".into(),
+                tool: Some("bash".into()),
+                message: "three times".into(),
+            });
+        }
+        let patterns = detect_runtime_error_patterns(&entries, 3);
+        assert_eq!(patterns.len(), 2);
+        assert_eq!(patterns[0].count, 5);
+        assert_eq!(patterns[1].count, 3);
+    }
+
+    #[test]
+    fn test_format_runtime_error_patterns_empty() {
+        use crate::commands_project::format_runtime_error_patterns;
+        let display = format_runtime_error_patterns(&[]);
+        assert!(display.contains("No recurring patterns"));
+    }
+
+    #[test]
+    fn test_format_runtime_error_patterns_with_data() {
+        use crate::commands_project::{format_runtime_error_patterns, RuntimeErrorPattern};
+        let patterns = vec![RuntimeErrorPattern {
+            category: "api_error".into(),
+            message: "connection refused".into(),
+            count: 10,
+            first_seen: "2026-03-19T10:00:00Z".into(),
+            last_seen: "2026-03-19T10:30:00Z".into(),
+        }];
+        let display = format_runtime_error_patterns(&patterns);
+        assert!(display.contains("10 × api_error"));
+        assert!(display.contains("connection refused"));
+        assert!(display.contains("2026-03-19"));
+    }
 }
