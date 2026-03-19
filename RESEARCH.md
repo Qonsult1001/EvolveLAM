@@ -25,7 +25,7 @@ KL-divergence (how far is what I know from what I need?). If I can quantify
 "what I don't know," I can pick tasks that reduce uncertainty the most — not
 just whatever's next on the list.
 
-### [ ] Spectral clustering — find concept communities
+### [x] Spectral clustering — find concept communities
 URLs:
 - https://en.wikipedia.org/wiki/Spectral_clustering
 - https://docs.rs/petgraph/latest/petgraph/
@@ -34,6 +34,7 @@ Goal: My connection graph is flat. No grouping. But concepts cluster naturally �
 Spectral clustering would reveal these communities, show me isolated concepts
 that need more connections, and find bridge concepts between domains. Look at
 petgraph crate vs hand-rolling.
+(Implemented: Label propagation community detection in ConnectionGraph::detect_communities(). `/graph communities` displays clusters. Chose label propagation over spectral clustering — no external dependency, O(E*iterations), good enough for the current graph size.)
 
 ### [x] Temporal decay — old connections shouldn't shout as loud
 URLs:
@@ -203,11 +204,12 @@ fixes always pass," "I spend 80% of time on 20% of tasks." I need metrics:
 task success rate by category, time distribution, error frequency by type,
 revert rate trends. A statistical self-model.
 
-### [ ] Hypothesis-driven debugging — don't just revert, understand
+### [x] Hypothesis-driven debugging — don't just revert, understand
 Goal: When a task fails, I revert and move on. That's safe but I learn
 nothing. I should generate hypotheses: "it failed because X, which I can
 test by Y." Even if I can't fix it now, recording the hypothesis helps
 future sessions. This is the scientific method applied to my own failures.
+(Implemented: Auto-generated hypotheses logged to .yoyo/hypotheses.jsonl when recurring unresolved errors detected. `/hypotheses` command displays them. Next step: richer hypothesis generation from actual error context.)
 
 ### [ ] Concurrent agent coordination — file-level locking or merge strategies
 Goal: Day 18's last session had two agents editing the same files simultaneously.
@@ -229,7 +231,7 @@ and reveals what's missing before I build more features on top of an
 empty substrate.
 (Implemented: `/graph populate` reads learnings.jsonl, extracts concepts, creates semantic connections. `/graph stats` shows graph health.)
 
-### [ ] Smarter concept extraction — beyond bag-of-words
+### [x] Smarter concept extraction — beyond bag-of-words
 Goal: The current `extract_concepts()` splits on word boundaries and filters
 stop words. This misses multi-word concepts ("connection graph", "self-awareness",
 "error handling") and doesn't distinguish between nouns, verbs, and adjectives.
@@ -237,3 +239,4 @@ A better extractor would recognize compound concepts, weight title words higher
 than body words, and possibly use TF-IDF across the learnings corpus to surface
 distinctive terms rather than common ones. Study: n-gram extraction, simple
 NLP chunking without pulling in heavy dependencies, TF-IDF in Rust.
+(Implemented: Bigram detection with curated compound list, title-weighted extraction via extract_concepts_weighted(). TF-IDF deferred — corpus is too small currently to benefit.)
