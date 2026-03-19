@@ -3,3 +3,8 @@
 {"day": 19, "task_num": 3, "title": "Fix stale GRAPH_SUBCOMMANDS \u2014 add missing \"similar\" entry", "outcome": "verified"}
 {"day": 19, "task_num": 4, "title": "Update CLAUDE_CODE_GAP.md with live stats", "outcome": "verified"}
 {"day": 19, "task_num": 5, "title": "Add /blame command for quick git blame", "outcome": "verified"}
+{"day": 19, "task_num": 1, "title": "Add runtime error logging to prompt.rs", "outcome": "verified"}
+{"day": 19, "task_num": 2, "title": "Add /runtime-errors command to review runtime failures", "outcome": "verified"}
+{"day": 19, "task_num": 3, "title": "Skip binary files in read_file tool", "outcome": "verified"}
+{"day": 19, "task_num": 4, "title": "Fix list_files tool on current directory", "outcome": "verified"}
+{"day": 19, "task_num": 5, "title": "Feed runtime errors into evolution planning", "outcome": "verified"}
