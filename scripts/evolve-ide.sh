@@ -319,7 +319,7 @@ ${GAP_PRIORITY}"
         fi
     fi
 
-    # Step 5c: Load runtime error summary
+    # Step 5c: Load runtime error summary with pattern detection
     RUNTIME_ERRORS=""
     if [ -f .yoyo/runtime_errors.jsonl ]; then
         RUNTIME_TOTAL=$(wc -l < .yoyo/runtime_errors.jsonl 2>/dev/null || echo 0)
@@ -328,11 +328,34 @@ ${GAP_PRIORITY}"
             echo "→ Runtime errors: $RUNTIME_TOTAL logged."
             # Category breakdown
             RUNTIME_CATS=$(grep -oE '"category":"[^"]*"' .yoyo/runtime_errors.jsonl | sort | uniq -c | sort -rn | head -5 || true)
+            # Pattern detection: group by (category, message) and show entries with 3+ occurrences
+            RUNTIME_PATTERNS=$(python3 -c "
+import json, sys
+from collections import Counter
+patterns = Counter()
+for line in open('.yoyo/runtime_errors.jsonl'):
+    line = line.strip()
+    if not line: continue
+    try:
+        e = json.loads(line)
+        key = (e.get('category',''), e.get('message','')[:80])
+        patterns[key] += 1
+    except: pass
+recurring = [(k,v) for k,v in patterns.most_common() if v >= 3]
+if recurring:
+    print('Recurring patterns (3+ occurrences):')
+    for (cat, msg), count in recurring[:10]:
+        print(f'  {count}x {cat}: {msg}')
+else:
+    print('No recurring patterns detected.')
+" 2>/dev/null || echo "  (pattern detection unavailable — python3 not found)")
             # Recent entries (last 5)
             RUNTIME_RECENT=$(tail -5 .yoyo/runtime_errors.jsonl | sed 's/^/    /' || true)
             RUNTIME_ERRORS="Runtime errors from real user sessions ($RUNTIME_TOTAL total):
 Category breakdown:
 $RUNTIME_CATS
+
+$RUNTIME_PATTERNS
 
 Recent errors:
 $RUNTIME_RECENT

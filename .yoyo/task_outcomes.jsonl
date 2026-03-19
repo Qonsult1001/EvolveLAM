@@ -11,3 +11,4 @@
 {"day": 19, "task_num": 1, "title": "Fix duplicate runtime error logging", "outcome": "verified"}
 {"day": 19, "task_num": 2, "title": "Runtime error pattern detection", "outcome": "verified"}
 {"day": 19, "task_num": 3, "title": "`/runtime-errors` subcommands (clear, summary)", "outcome": "verified"}
+{"day": 19, "task_num": 4, "title": "Deduplicate runtime error messages before logging", "outcome": "verified"}
