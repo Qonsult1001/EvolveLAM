@@ -1,6 +1,6 @@
 # Gap Analysis: yoyo vs Claude Code
 
-Last updated: Day 17 (2026-03-17)
+Last updated: Day 19 (2026-03-19)
 
 This document tracks the feature gap between yoyo and Claude Code, used to inform development priorities when there are no community issues to address.
 
@@ -22,7 +22,7 @@ This document tracks the feature gap between yoyo and Claude Code, used to infor
 | Error recovery / auto-retry | ✅ | ✅ | yoagent retries 3x with exponential backoff by default |
 | Subagent / task spawning | 🟡 | ✅ | Basic `/spawn` runs tasks in separate context; Claude Code has richer orchestration |
 | Parallel tool execution | ✅ | ✅ | yoagent 0.6's default `ToolExecutionStrategy::Parallel` runs tools concurrently |
-| Tool output streaming | 🟡 | ✅ | `ToolExecutionUpdate` events handled; markdown streaming fixed (Day 17); no real-time subprocess streaming yet |
+| Tool output streaming | ✅ | ✅ | `StreamingBashTool` streams subprocess output line-by-line via `ToolContext.on_update` (Day 19); markdown streaming fixed (Day 17) |
 
 ## CLI & UX
 
@@ -119,6 +119,10 @@ Based on this analysis, the highest-impact missing features are:
 2. **Full graceful degradation** — Fallback behavior on partial tool failures
 
 Recently completed:
+
+- ✅ StreamingBashTool (Day 19) — real-time subprocess output streaming via `ToolContext.on_update`
+- ✅ Convergence metrics (Day 19) — `/stats` shows revert rate, test growth, activity trend, convergence verdict
+- ✅ Task confidence scoring (Day 19) — `/confidence` scores SESSION_PLAN.md tasks by familiarity
 - ✅ True token-by-token streaming (Day 17) — fixed line-buffering bug in MarkdownRenderer; mid-line tokens now render immediately
 - ✅ Parallel tool execution (Day 15) — already supported via yoagent 0.6's `ToolExecutionStrategy::Parallel`
 - ✅ Project memory system (Day 15) — `/remember`, `/recall`, `/forget` for persistent cross-session memory
@@ -155,9 +159,9 @@ Recently completed:
 
 ## Stats
 
-- yoyo: ~15,100 lines of Rust across 12 source files + integration tests
-- 636 tests passing (569 unit + 67 integration)
-- 38 REPL commands (including /spawn, /find, /docs, /fix, /lint, /pr, /review, /init, /mark, /jump, /marks, /index)
+- yoyo: ~23,200 lines of Rust across 15 source files + integration tests
+- 828 tests passing (761 unit + 67 integration)
+- 41 REPL commands (including /spawn, /find, /docs, /fix, /lint, /pr, /review, /init, /mark, /jump, /marks, /index, /confidence, /stats, /graph, /errors, /hypotheses, /coupling, /ast)
 - 25 CLI flags (+ short aliases)
 - 10+ provider backends
 - MCP server support
@@ -172,3 +176,7 @@ Recently completed:
 - Conversation bookmarks (/mark, /jump, /marks)
 - Codebase indexing (/index)
 - Argument-aware tab completion
+- StreamingBashTool with real-time subprocess output
+- Convergence metrics (/stats)
+- Task confidence scoring (/confidence)
+- Latent space connection graph (/graph)
