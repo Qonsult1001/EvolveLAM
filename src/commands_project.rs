@@ -2324,13 +2324,190 @@ pub fn format_errors_display(entries: &[ErrorLogEntry]) -> String {
     out
 }
 
-/// Handle the /errors command.
-pub fn handle_errors() {
+/// Handle the /errors command. Supports `/errors` (display) and `/errors compact` (compact log).
+pub fn handle_errors(input: &str) {
+    let args = input.strip_prefix("/errors").unwrap_or("").trim();
+
     let path = std::path::Path::new(".yoyo/error_log.jsonl");
     let content = std::fs::read_to_string(path).unwrap_or_default();
     let entries = parse_error_log(&content);
-    let display = format_errors_display(&entries);
-    println!("{DIM}{display}{RESET}\n");
+
+    if args == "compact" {
+        let summary = compact_error_log(&entries);
+        println!("{DIM}{summary}{RESET}\n");
+    } else {
+        let display = format_errors_display(&entries);
+        println!("{DIM}{display}{RESET}\n");
+    }
+}
+
+/// Compact the error log: aggregate by category, show summary stats,
+/// and optionally truncate old entries from the file.
+pub fn compact_error_log(entries: &[ErrorLogEntry]) -> String {
+    if entries.is_empty() {
+        return "  No error log entries to compact.\n".to_string();
+    }
+
+    // Aggregate by category
+    let mut category_stats: std::collections::HashMap<String, CategoryStats> =
+        std::collections::HashMap::new();
+
+    for entry in entries {
+        for (cat, count) in &entry.categories {
+            let stat = category_stats.entry(cat.clone()).or_insert(CategoryStats {
+                total_occurrences: 0,
+                total_count: 0,
+                fixed_count: 0,
+                last_seen: String::new(),
+            });
+            stat.total_occurrences += 1;
+            stat.total_count += count;
+            if entry.resolved == Some(true) && entry.fixed_categories.contains(cat) {
+                stat.fixed_count += 1;
+            }
+            if entry.ts > stat.last_seen {
+                stat.last_seen.clone_from(&entry.ts);
+            }
+        }
+    }
+
+    // Format summary
+    let mut out = String::new();
+    out.push_str("  Error Log Summary (compacted):\n\n");
+    out.push_str("  Category              | Total | Fixed | Rate  | Last Seen\n");
+    out.push_str("  ──────────────────────┼───────┼───────┼───────┼──────────\n");
+
+    let mut sorted: Vec<_> = category_stats.iter().collect();
+    sorted.sort_by(|a, b| b.1.total_count.cmp(&a.1.total_count));
+
+    for (cat, stat) in &sorted {
+        let fix_rate = if stat.total_occurrences > 0 {
+            (stat.fixed_count as f64 / stat.total_occurrences as f64) * 100.0
+        } else {
+            0.0
+        };
+        let last_date = if stat.last_seen.len() >= 10 {
+            &stat.last_seen[..10]
+        } else {
+            &stat.last_seen
+        };
+        out.push_str(&format!(
+            "  {:22}| {:>5} | {:>5} | {:>4.0}% | {}\n",
+            truncate_category(cat, 22),
+            stat.total_count,
+            stat.fixed_count,
+            fix_rate,
+            last_date,
+        ));
+    }
+
+    // Compact file: keep only entries from last 7 days
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let cutoff_secs = now_secs.saturating_sub(7 * 86400);
+
+    let path = std::path::Path::new(".yoyo/error_log.jsonl");
+    if let Ok(raw) = std::fs::read_to_string(path) {
+        let mut kept = Vec::new();
+        let mut dropped = 0u32;
+        for line in raw.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            // Check if entry is recent enough by parsing ts
+            if let Some(ts) = extract_ts_epoch(line) {
+                if ts >= cutoff_secs {
+                    kept.push(line.to_string());
+                } else {
+                    dropped += 1;
+                }
+            } else {
+                kept.push(line.to_string()); // keep unparseable entries
+            }
+        }
+
+        if dropped > 0 {
+            let mut output = kept.join("\n");
+            if !output.is_empty() {
+                output.push('\n');
+            }
+            let _ = std::fs::write(path, output);
+            out.push_str(&format!(
+                "\n  Compacted: dropped {} entries older than 7 days, kept {}\n",
+                dropped,
+                kept.len()
+            ));
+        } else {
+            out.push_str(&format!(
+                "\n  All {} entries are within the last 7 days — nothing to compact.\n",
+                entries.len()
+            ));
+        }
+    }
+
+    out
+}
+
+struct CategoryStats {
+    total_occurrences: usize,
+    total_count: usize,
+    fixed_count: usize,
+    last_seen: String,
+}
+
+pub fn truncate_category(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        format!("{:width$}", s, width = max)
+    } else {
+        format!("{}…", &s[..max - 1])
+    }
+}
+
+/// Try to extract epoch seconds from a JSON line's "ts" field (ISO 8601 format).
+fn extract_ts_epoch(json: &str) -> Option<u64> {
+    let ts_str = {
+        let pattern = "\"ts\":\"";
+        let idx = json.find(pattern)? + pattern.len();
+        let rest = &json[idx..];
+        let end = rest.find('"')?;
+        &rest[..end]
+    };
+    // Parse "YYYY-MM-DDTHH:MM:SSZ" manually
+    if ts_str.len() < 19 {
+        return None;
+    }
+    let year: i64 = ts_str[0..4].parse().ok()?;
+    let month: u32 = ts_str[5..7].parse().ok()?;
+    let day: u32 = ts_str[8..10].parse().ok()?;
+    let hour: u64 = ts_str[11..13].parse().ok()?;
+    let min: u64 = ts_str[14..16].parse().ok()?;
+    let sec: u64 = ts_str[17..19].parse().ok()?;
+
+    // Convert to epoch using days_from_civil (inverse of civil_from_days)
+    let days = days_from_civil(year, month, day)?;
+    Some(days as u64 * 86400 + hour * 3600 + min * 60 + sec)
+}
+
+/// Compute days since epoch from civil date (inverse of civil_from_days).
+fn days_from_civil(year: i64, month: u32, day: u32) -> Option<u64> {
+    let y = if month <= 2 { year - 1 } else { year };
+    let m = if month <= 2 {
+        month as i64 + 9
+    } else {
+        month as i64 - 3
+    };
+    let era = y.div_euclid(400);
+    let yoe = y.rem_euclid(400);
+    let doy = (153 * m + 2) / 5 + day as i64 - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let total = era * 146097 + doe - 719468;
+    if total < 0 {
+        None
+    } else {
+        Some(total as u64)
+    }
 }
 
 // ── /hypotheses ─────────────────────────────────────────────────────────

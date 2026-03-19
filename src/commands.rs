@@ -44,16 +44,17 @@ mod tests {
     use crate::commands_project::{
         build_commands_for_project, build_fix_prompt, build_project_tree, classify_failure_oneline,
         classify_go_error, classify_node_error, classify_python_error, classify_rust_error,
-        compute_fix_rates, detect_project_name, detect_project_type, detect_recurring_errors,
-        extract_first_meaningful_line, find_files, fix_strategy, format_error_classification,
-        format_errors_display, format_generic_categories, format_health_timing_summary,
-        format_hypotheses_display, format_project_index, format_tree_from_paths, fuzzy_score,
-        generate_init_content, generic_fix_strategy, health_checks_for_project, highlight_match,
-        is_binary_extension, lint_command_for_project, parse_error_log, parse_hypotheses,
-        parse_test_summary, run_health_check_for_project, run_health_checks_full_output,
-        run_health_checks_with_classification, run_shell_command, scan_important_dirs,
-        scan_important_files, summarize_error_log, test_command_for_project, ErrorLogEntry,
-        GenericErrorCategory, Hypothesis, IndexEntry, ProjectType, RustErrorCategory, TestSummary,
+        compact_error_log, compute_fix_rates, detect_project_name, detect_project_type,
+        detect_recurring_errors, extract_first_meaningful_line, find_files, fix_strategy,
+        format_error_classification, format_errors_display, format_generic_categories,
+        format_health_timing_summary, format_hypotheses_display, format_project_index,
+        format_tree_from_paths, fuzzy_score, generate_init_content, generic_fix_strategy,
+        health_checks_for_project, highlight_match, is_binary_extension, lint_command_for_project,
+        parse_error_log, parse_hypotheses, parse_test_summary, run_health_check_for_project,
+        run_health_checks_full_output, run_health_checks_with_classification, run_shell_command,
+        scan_important_dirs, scan_important_files, summarize_error_log, test_command_for_project,
+        truncate_category, ErrorLogEntry, GenericErrorCategory, Hypothesis, IndexEntry,
+        ProjectType, RustErrorCategory, TestSummary,
     };
     use crate::commands_project::{
         collect_gap_stats, format_gap_stats, round_to_hundreds, GapStats,
@@ -3403,5 +3404,51 @@ test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
         assert!(formatted.contains("68"));
         assert!(formatted.contains("818"));
         assert!(formatted.contains("51"));
+    }
+
+    // ── /errors compact tests ──────────────────────────────────────────
+
+    #[test]
+    fn test_compact_error_log_empty() {
+        let result = compact_error_log(&[]);
+        assert!(result.contains("No error log entries"));
+    }
+
+    #[test]
+    fn test_compact_error_log_aggregates() {
+        let entries = vec![
+            ErrorLogEntry {
+                ts: "2026-03-19T10:00:00Z".to_string(),
+                day: 19,
+                categories: vec![("compile_error".to_string(), 3)],
+                source: "cargo build".to_string(),
+                resolved: Some(true),
+                fixed_categories: vec!["compile_error".to_string()],
+            },
+            ErrorLogEntry {
+                ts: "2026-03-19T11:00:00Z".to_string(),
+                day: 19,
+                categories: vec![
+                    ("compile_error".to_string(), 1),
+                    ("borrow_checker".to_string(), 2),
+                ],
+                source: "cargo build".to_string(),
+                resolved: None,
+                fixed_categories: vec![],
+            },
+        ];
+        let result = compact_error_log(&entries);
+        assert!(result.contains("compile_error"));
+        assert!(result.contains("borrow_checker"));
+        assert!(result.contains("Summary"));
+    }
+
+    #[test]
+    fn test_truncate_category() {
+        assert_eq!(truncate_category("short", 22), "short                 ");
+        assert_eq!(
+            truncate_category("a_very_long_category_name_here", 22),
+            "a_very_long_category_…"
+        );
     }
 }

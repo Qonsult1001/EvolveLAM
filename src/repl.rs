@@ -422,8 +422,8 @@ pub async fn run_repl(
                 commands::handle_health();
                 continue;
             }
-            "/errors" => {
-                commands::handle_errors();
+            s if s == "/errors" || s.starts_with("/errors ") => {
+                commands::handle_errors(input);
                 continue;
             }
             "/gap" => {
