@@ -463,6 +463,7 @@ async fn run_prompt_once(agent: &mut Agent, input: &str) -> PromptResult {
                     AgentEvent::AgentEnd { messages } => {
                         // Stop spinner if still running
                         if let Some(s) = spinner.take() { s.stop(); }
+                        let mut logged_error: Option<String> = None;
                         for msg in &messages {
                             if let AgentMessage::Llm(Message::Assistant { usage: msg_usage, stop_reason, error_message, .. }) = msg {
                                 usage.input += msg_usage.input;
@@ -476,8 +477,11 @@ async fn run_prompt_once(agent: &mut Agent, input: &str) -> PromptResult {
                                             println!();
                                             in_text = false;
                                         }
-                                        // Log API error persistently
-                                        append_runtime_error("api_error", err_msg, None);
+                                        // Log API error persistently — deduplicate within this AgentEnd event
+                                        if logged_error.as_deref() != Some(err_msg) {
+                                            append_runtime_error("api_error", err_msg, None);
+                                            logged_error = Some(err_msg.clone());
+                                        }
                                         // Check if this error is worth retrying
                                         if is_retriable_error(err_msg) {
                                             retriable_error = Some(err_msg.clone());
