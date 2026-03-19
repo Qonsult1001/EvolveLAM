@@ -601,6 +601,174 @@ pub fn format_couplings(couplings: &[FileCoupling]) -> String {
     lines.join("\n")
 }
 
+// ============================================================================
+// Function-Level Cross-Reference Detection
+// ============================================================================
+
+/// A function-level cross-reference: symbol defined in one file, used in another.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FunctionRef {
+    /// File that defines the symbol.
+    pub defined_in: String,
+    /// Name of the symbol (function, struct, type, etc.).
+    pub symbol_name: String,
+    /// File that references/uses the symbol.
+    pub used_in: String,
+    /// Line number in the using file.
+    pub used_at_line: usize,
+}
+
+/// Detect function-level cross-references between Rust source files.
+/// For each file, extracts public symbols, then searches all other files
+/// for references to those symbols. Returns cross-file references only.
+pub fn detect_function_refs(src_dir: &Path) -> Vec<FunctionRef> {
+    let mut refs = Vec::new();
+
+    // Step 1: Read all files and extract public symbols
+    let entries: Vec<_> = match std::fs::read_dir(src_dir) {
+        Ok(e) => e.flatten().collect(),
+        Err(_) => return refs,
+    };
+
+    let mut file_contents: Vec<(String, String)> = Vec::new();
+    let mut file_symbols: Vec<(String, Vec<String>)> = Vec::new();
+
+    for entry in &entries {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+            continue;
+        }
+        let filename = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        // Extract public symbol names from this file
+        let symbols = extract_symbols(&filename, &content);
+        let pub_names: Vec<String> = symbols
+            .iter()
+            .filter(|s| s.signature.starts_with("pub ") || s.signature.starts_with("pub("))
+            .filter(|s| s.name.len() > 3) // skip very short names to avoid false positives
+            .map(|s| s.name.clone())
+            .collect();
+
+        file_contents.push((filename.clone(), content));
+        file_symbols.push((filename, pub_names));
+    }
+
+    // Step 2: For each file's public symbols, search other files for references
+    for (def_file, symbols) in &file_symbols {
+        for symbol_name in symbols {
+            for (ref_file, content) in &file_contents {
+                if ref_file == def_file {
+                    continue; // skip self-references
+                }
+                // Search for the symbol name in the referencing file
+                for (line_num, line) in content.lines().enumerate() {
+                    if line.contains(symbol_name.as_str()) {
+                        // Verify it's a real reference: word boundary check
+                        if is_word_boundary_match(line, symbol_name) {
+                            refs.push(FunctionRef {
+                                defined_in: def_file.clone(),
+                                symbol_name: symbol_name.clone(),
+                                used_in: ref_file.clone(),
+                                used_at_line: line_num + 1,
+                            });
+                            break; // only record first reference per file
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    refs.sort_by(|a, b| {
+        a.defined_in
+            .cmp(&b.defined_in)
+            .then(a.symbol_name.cmp(&b.symbol_name))
+            .then(a.used_in.cmp(&b.used_in))
+    });
+    refs
+}
+
+/// Check if `name` appears at a word boundary in `line` (not as substring of a longer word).
+fn is_word_boundary_match(line: &str, name: &str) -> bool {
+    let mut start = 0;
+    while let Some(pos) = line[start..].find(name) {
+        let abs_pos = start + pos;
+        let before_ok = abs_pos == 0
+            || !line.as_bytes()[abs_pos - 1].is_ascii_alphanumeric()
+                && line.as_bytes()[abs_pos - 1] != b'_';
+        let end_pos = abs_pos + name.len();
+        let after_ok = end_pos >= line.len()
+            || !line.as_bytes()[end_pos].is_ascii_alphanumeric()
+                && line.as_bytes()[end_pos] != b'_';
+        if before_ok && after_ok {
+            return true;
+        }
+        start = abs_pos + 1;
+        if start >= line.len() {
+            break;
+        }
+    }
+    false
+}
+
+/// Format function-level cross-references for display.
+pub fn format_function_refs(refs: &[FunctionRef]) -> String {
+    if refs.is_empty() {
+        return "  No function-level cross-references detected.".to_string();
+    }
+
+    // Group by defining file
+    let mut by_def: std::collections::BTreeMap<&str, Vec<(&str, &str)>> =
+        std::collections::BTreeMap::new();
+    for r in refs {
+        by_def
+            .entry(&r.defined_in)
+            .or_default()
+            .push((&r.symbol_name, &r.used_in));
+    }
+
+    let mut lines = Vec::new();
+    lines.push(format!(
+        "  Function-level cross-references ({} links):\n",
+        refs.len()
+    ));
+    for (def_file, usages) in &by_def {
+        // Group by symbol
+        let mut by_sym: std::collections::BTreeMap<&str, Vec<&str>> =
+            std::collections::BTreeMap::new();
+        for (sym, used_in) in usages {
+            by_sym.entry(sym).or_default().push(used_in);
+        }
+        lines.push(format!("  {def_file}:"));
+        for (sym, files) in &by_sym {
+            lines.push(format!("    {sym} → [{}]", files.join(", ")));
+        }
+    }
+
+    // Most-referenced symbols
+    let mut sym_counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for r in refs {
+        *sym_counts.entry(&r.symbol_name).or_insert(0) += 1;
+    }
+    let mut count_list: Vec<(&&str, &usize)> = sym_counts.iter().collect();
+    count_list.sort_by(|a, b| b.1.cmp(a.1));
+    lines.push(String::new());
+    lines.push("  Most-referenced symbols:".to_string());
+    for (sym, count) in count_list.iter().take(10) {
+        lines.push(format!("    {sym}: {count} file(s)"));
+    }
+
+    lines.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -915,5 +1083,60 @@ use std::io;
         assert!(result.contains("Most depended-on"));
         // cli has 2 dependents
         assert!(result.contains("cli: 2 dependents"));
+    }
+
+    // ── Function-level cross-reference tests ────────────────────────────
+
+    #[test]
+    fn test_is_word_boundary_match_exact() {
+        assert!(is_word_boundary_match("use crate::Symbol;", "Symbol"));
+        assert!(is_word_boundary_match("let x = Symbol::new();", "Symbol"));
+    }
+
+    #[test]
+    fn test_is_word_boundary_match_substring_rejected() {
+        // "Symbol" inside "SymbolKind" should not match
+        assert!(!is_word_boundary_match(
+            "let k = SymbolKind::Function;",
+            "Symbol"
+        ));
+        assert!(!is_word_boundary_match("fn my_Symbol_helper()", "Symbol"));
+    }
+
+    #[test]
+    fn test_is_word_boundary_match_at_edges() {
+        assert!(is_word_boundary_match("Symbol", "Symbol"));
+        assert!(is_word_boundary_match("Symbol;", "Symbol"));
+        assert!(is_word_boundary_match("(Symbol)", "Symbol"));
+    }
+
+    #[test]
+    fn test_format_function_refs_empty() {
+        let result = format_function_refs(&[]);
+        assert!(result.contains("No function-level cross-references"));
+    }
+
+    #[test]
+    fn test_format_function_refs_basic() {
+        let refs = vec![
+            FunctionRef {
+                defined_in: "ast.rs".to_string(),
+                symbol_name: "Symbol".to_string(),
+                used_in: "commands.rs".to_string(),
+                used_at_line: 10,
+            },
+            FunctionRef {
+                defined_in: "ast.rs".to_string(),
+                symbol_name: "Symbol".to_string(),
+                used_in: "repl.rs".to_string(),
+                used_at_line: 20,
+            },
+        ];
+        let result = format_function_refs(&refs);
+        assert!(result.contains("ast.rs:"));
+        assert!(result.contains("Symbol"));
+        assert!(result.contains("commands.rs"));
+        assert!(result.contains("repl.rs"));
+        assert!(result.contains("Most-referenced"));
     }
 }

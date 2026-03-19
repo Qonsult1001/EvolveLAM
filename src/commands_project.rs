@@ -2420,5 +2420,10 @@ pub fn handle_coupling() {
     }
     let couplings = ast::detect_file_couplings(src_dir);
     let formatted = ast::format_couplings(&couplings);
-    println!("{DIM}{formatted}{RESET}\n");
+    println!("{DIM}{formatted}{RESET}");
+
+    // Function-level cross-references
+    let func_refs = ast::detect_function_refs(src_dir);
+    let func_formatted = ast::format_function_refs(&func_refs);
+    println!("{DIM}{func_formatted}{RESET}\n");
 }
