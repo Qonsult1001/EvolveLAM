@@ -322,6 +322,10 @@ ${GAP_PRIORITY}"
     # Save metadata for subsequent phases
     save_metadata
 
+    # Record session start epoch for timing calculations
+    mkdir -p .yoyo
+    date +%s > "$EVOLVE_DIR/session_start"
+
     # Write the planning prompt
     cat > "$EVOLVE_DIR/plan_prompt.md" <<PLANEOF
 You are yoyo, a self-evolving coding agent. Today is Day $DAY ($DATE $SESSION_TIME).
@@ -637,6 +641,28 @@ $TASK_DESC"
     else
         echo "  Task $CURRENT_TASK: VERIFIED OK"
     fi
+
+    # Write task outcome to JSONL
+    mkdir -p .yoyo
+    if [ "$TASK_OK" = true ]; then
+        TASK_OUTCOME="verified"
+    else
+        TASK_OUTCOME="reverted"
+    fi
+    $PYTHON -c "
+import json, sys
+entry = {
+    'day': int(sys.argv[1]),
+    'task_num': int(sys.argv[2]),
+    'title': sys.argv[3],
+    'outcome': sys.argv[4]
+}
+print(json.dumps(entry))
+" "$DAY" "$CURRENT_TASK" "$task_title" "$TASK_OUTCOME" >> .yoyo/task_outcomes.jsonl 2>/dev/null || {
+        # Fallback: escape quotes in title for safe JSON
+        safe_title=$(echo "$task_title" | sed 's/"/\\"/g')
+        echo "{\"day\":$DAY,\"task_num\":$CURRENT_TASK,\"title\":\"$safe_title\",\"outcome\":\"$TASK_OUTCOME\"}" >> .yoyo/task_outcomes.jsonl
+    }
 
     # Mark task as verified (regardless of pass/fail, we move forward)
     echo "$CURRENT_TASK" > "$EVOLVE_DIR/last_verified_task"
@@ -963,6 +989,28 @@ ACKEOF
     else
         echo "  No uncommitted changes remaining."
     fi
+
+    # Write session timing to JSONL
+    mkdir -p .yoyo
+    SESSION_END_EPOCH=$(date +%s)
+    SESSION_START_EPOCH=$(cat "$EVOLVE_DIR/session_start" 2>/dev/null || echo "$SESSION_END_EPOCH")
+    SESSION_DURATION=$((SESSION_END_EPOCH - SESSION_START_EPOCH))
+    TASKS_COMPLETED=$(grep -c '"outcome": *"verified"' .yoyo/task_outcomes.jsonl 2>/dev/null || \
+                      grep -c '"outcome":"verified"' .yoyo/task_outcomes.jsonl 2>/dev/null || echo 0)
+    TASKS_REVERTED=$(grep -c '"outcome": *"reverted"' .yoyo/task_outcomes.jsonl 2>/dev/null || \
+                     grep -c '"outcome":"reverted"' .yoyo/task_outcomes.jsonl 2>/dev/null || echo 0)
+    $PYTHON -c "
+import json, sys
+entry = {
+    'day': int(sys.argv[1]),
+    'session_time': sys.argv[2],
+    'duration_secs': int(sys.argv[3]),
+    'tasks_completed': int(sys.argv[4]),
+    'tasks_reverted': int(sys.argv[5])
+}
+print(json.dumps(entry))
+" "$DAY" "$SESSION_TIME" "$SESSION_DURATION" "$TASKS_COMPLETED" "$TASKS_REVERTED" >> .yoyo/session_timing.jsonl 2>/dev/null || \
+        echo "{\"day\":$DAY,\"session_time\":\"$SESSION_TIME\",\"duration_secs\":$SESSION_DURATION,\"tasks_completed\":$TASKS_COMPLETED,\"tasks_reverted\":$TASKS_REVERTED}" >> .yoyo/session_timing.jsonl
 
     # Tag known-good state
     TAG_NAME="day${DAY}-$(echo "$SESSION_TIME" | tr ':' '-')"
