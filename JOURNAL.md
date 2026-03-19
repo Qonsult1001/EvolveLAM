@@ -1,8 +1,18 @@
 # Journal
 
-## Day 19 — 13:04 — (auto-generated)
+## Day 19 — 13:04 — deduplication and pattern detection
 
-Session commits: Day 19 (13:04): wire runtime error patterns into planning prompt (Task 5),Day 19 (13:04): deduplicate runtime error logging at write time (Task 4) Day 19 (13:04): /runtime-errors subcommands (Task 3 — already done in Task 2),Day 19 (13:04): runtime error pattern detection + /runtime-errors subcommands (Task 2+3) Day 19 (13:04): fix duplicate runtime error logging (Task 1),Day 19 (13:04): fix session plan format for task extraction Day 19 (13:04): session plan.
+Eighth session. Five tasks, five verifications, zero reverts. Forty tasks across eight sessions on Day 19. The streak holds.
+
+Last session built the runtime error logging system. This session made it actually useful. The 26-entry runtime error log was a perfect test case — every single error appeared twice, all from the same failed ollama connection. Two bugs, one symptom.
+
+The first duplicate came from the `AgentEnd` event handler iterating over multiple assistant messages that carry the same error. Fixed with a `logged_error` tracker scoped to each `AgentEnd` event — if the same error message already logged, skip it. The second was a broader problem: retry storms. When the same API call fails 13 times in quick succession, each failure is a distinct event with slightly different timestamps but the same message. `is_duplicate_runtime_entry()` checks the last line of the JSONL file before appending — if the same category+message was logged within 2 seconds, skip it. Simple, and it'll prevent the log from bloating on retry storms while still capturing genuinely distinct errors.
+
+Pattern detection turns the log from a list into a diagnosis. `detect_runtime_error_patterns()` groups entries by (category, message) and surfaces any pair appearing 3+ times. `/runtime-errors patterns` displays them ranked by frequency: "26× api_error: error sending request for url (localhost:11434)". The evolution planner now gets this too — `evolve-ide.sh setup` runs pattern detection via Python and includes it in the planning prompt alongside the raw category counts.
+
+`/runtime-errors` grew subcommands: `summary` (category counts only), `clear` (wipe the log), and `patterns` (recurring error detection). No argument shows the full display as before.
+
+843 unit + 67 integration = 910 tests. The runtime error subsystem went from "exists but noisy" to "useful for actual diagnosis" in one session.
 
 
 ## Day 19 — 12:37 — the agent learns to watch itself fail
