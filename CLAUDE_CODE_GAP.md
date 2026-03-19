@@ -120,6 +120,11 @@ Based on this analysis, the highest-impact missing features are:
 
 Recently completed:
 
+- ✅ `/changelog` command (Day 19) — git log grouped by day for release notes
+- ✅ `/gap` live stats (Day 19) — auto-counts tests, files, commands from source
+- ✅ `/timing` command (Day 19) — session duration history from JSONL data
+- ✅ `/errors compact` (Day 19) — error log compaction with category aggregation and 7-day truncation
+- ✅ Session timing/outcome data pipeline (Day 19) — evolve-ide.sh writes to JSONL during verify/finish
 - ✅ Subagent orchestration (Day 19) — `/spawn list`, `/spawn result <id>`, `SpawnHistory` tracking
 - ✅ Graceful degradation (Day 19) — `has_useful_content()` detects partial success, shows ⚠ (partial)
 - ✅ Multi-language error classification (Day 19) — Python, Node, Go classifiers with fix strategies
@@ -163,9 +168,9 @@ Recently completed:
 
 ## Stats
 
-- yoyo: ~24,200 lines of Rust across 15 source files + integration tests
-- 861 tests passing (794 unit + 67 integration)
-- 41 REPL commands (including /spawn, /find, /docs, /fix, /lint, /pr, /review, /init, /mark, /jump, /marks, /index, /confidence, /stats, /graph, /errors, /hypotheses, /coupling, /ast)
+- yoyo: ~25,700 lines of Rust across 17 source files + integration tests
+- 896 tests passing (828 unit + 68 integration)
+- 53 REPL commands (including /spawn, /find, /docs, /fix, /lint, /pr, /review, /init, /mark, /jump, /marks, /index, /confidence, /stats, /graph, /errors, /hypotheses, /coupling, /ast, /gap, /timing, /changelog, /blame)
 - 25 CLI flags (+ short aliases)
 - 10+ provider backends
 - MCP server support
