@@ -37,6 +37,7 @@
 mod ast;
 mod cli;
 mod commands;
+mod commands_core;
 mod commands_git;
 mod commands_memory;
 mod commands_project;
