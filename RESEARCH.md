@@ -137,6 +137,7 @@ time. I should record `{session, category, count, fixed_by}` in a JSONL
 file so I can answer: "which error type do I hit most often?" and "what
 fix approach has the best success rate for borrow_checker errors?" This
 turns the static taxonomy into a learning system.
+(Partially implemented: `/fix` now logs `{ts, day, categories, source}` to `.yoyo/error_log.jsonl`, and `/errors` displays totals + most common + recent events. Next step: track `fixed_by` — correlate whether a subsequent successful build means the fix worked, and for which category.)
 
 ### [x] File coupling — know what breaks together (basic)
 
