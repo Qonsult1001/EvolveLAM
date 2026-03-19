@@ -1029,7 +1029,18 @@ pub fn format_confidence_display(
 }
 
 /// Handle the /confidence command.
-pub fn handle_confidence() {
+pub fn handle_confidence(input: &str) {
+    let rest = input.strip_prefix("/confidence").unwrap_or("").trim();
+
+    if rest == "accuracy" {
+        show_confidence_accuracy();
+        return;
+    }
+    if rest == "log" {
+        log_confidence_predictions();
+        return;
+    }
+
     let plan = std::fs::read_to_string("SESSION_PLAN.md").unwrap_or_default();
     let tasks = parse_plan_tasks(&plan);
 
@@ -1056,6 +1067,203 @@ pub fn handle_confidence() {
 
     let display = format_confidence_display(&tasks, &journal_lower, &known_files, &graph_concepts);
     println!("{DIM}{display}{RESET}\n");
+}
+
+/// Log current confidence predictions to `.yoyo/confidence_log.jsonl`.
+fn log_confidence_predictions() {
+    let plan = std::fs::read_to_string("SESSION_PLAN.md").unwrap_or_default();
+    let tasks = parse_plan_tasks(&plan);
+    if tasks.is_empty() {
+        println!("{DIM}  No tasks found in SESSION_PLAN.md.{RESET}\n");
+        return;
+    }
+
+    let journal = std::fs::read_to_string("JOURNAL.md").unwrap_or_default();
+    let journal_lower = journal.to_lowercase();
+    let known_files: Vec<String> = std::fs::read_dir("src")
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    let graph = crate::memory::ConnectionGraph::load();
+    let graph_concepts: Vec<String> = graph
+        .search_concepts("")
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
+
+    let day = std::fs::read_to_string("DAY_COUNT")
+        .ok()
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .unwrap_or(0);
+
+    let yoyo_dir = std::path::Path::new(".yoyo");
+    if !yoyo_dir.exists() {
+        let _ = std::fs::create_dir_all(yoyo_dir);
+    }
+
+    use std::io::Write;
+    let mut count = 0;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(".yoyo/confidence_log.jsonl")
+    {
+        for task in &tasks {
+            let (conf, _) =
+                score_task_confidence(task, &journal_lower, &known_files, &graph_concepts);
+            let line = format!(
+                "{{\"day\":{},\"task\":{},\"title\":\"{}\",\"confidence\":\"{}\"}}",
+                day,
+                task.number,
+                task.title.replace('"', "'"),
+                conf
+            );
+            let _ = writeln!(f, "{}", line);
+            count += 1;
+        }
+    }
+    println!(
+        "{GREEN}  ✓ Logged {count} confidence predictions to .yoyo/confidence_log.jsonl{RESET}\n"
+    );
+}
+
+/// A confidence prediction record.
+#[derive(Debug)]
+pub struct ConfidencePrediction {
+    #[allow(dead_code)] // Populated for future per-day analysis
+    pub day: u32,
+    pub task: u32,
+    #[allow(dead_code)] // Populated for test access and future display
+    pub title: String,
+    pub confidence: String,
+}
+
+/// Parse confidence log entries.
+pub fn parse_confidence_log(content: &str) -> Vec<ConfidencePrediction> {
+    let mut entries = Vec::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let (Some(day), Some(task), Some(title), Some(conf)) = (
+            extract_conf_number(line, "day"),
+            extract_conf_number(line, "task"),
+            extract_conf_string(line, "title"),
+            extract_conf_string(line, "confidence"),
+        ) {
+            entries.push(ConfidencePrediction {
+                day,
+                task,
+                title,
+                confidence: conf,
+            });
+        }
+    }
+    entries
+}
+
+fn extract_conf_string(json: &str, key: &str) -> Option<String> {
+    let pattern = format!("\"{}\":\"", key);
+    let start = json.find(&pattern)? + pattern.len();
+    let rest = &json[start..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
+}
+
+fn extract_conf_number(json: &str, key: &str) -> Option<u32> {
+    let pattern = format!("\"{}\":", key);
+    let start = json.find(&pattern)? + pattern.len();
+    let rest = &json[start..];
+    let end = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
+    rest[..end].parse().ok()
+}
+
+/// Show confidence calibration: how accurate were predictions?
+fn show_confidence_accuracy() {
+    let content = std::fs::read_to_string(".yoyo/confidence_log.jsonl").unwrap_or_default();
+    let predictions = parse_confidence_log(&content);
+    if predictions.is_empty() {
+        println!(
+            "{DIM}  No confidence predictions logged yet.\n  Use /confidence log to record predictions.{RESET}\n"
+        );
+        return;
+    }
+
+    // Try to correlate with journal outcomes (look for "VERIFIED" or "REVERTED" per task)
+    let journal = std::fs::read_to_string("JOURNAL.md").unwrap_or_default();
+    let journal_lower = journal.to_lowercase();
+
+    let mut high_total = 0u32;
+    let mut high_success = 0u32;
+    let mut med_total = 0u32;
+    let mut med_success = 0u32;
+    let mut low_total = 0u32;
+    let mut low_success = 0u32;
+
+    for pred in &predictions {
+        // Heuristic: check if journal mentions this task as verified or reverted
+        let task_marker = format!("task {}", pred.task);
+        let verified = journal_lower.contains(&format!("{}: verified", task_marker))
+            || journal_lower.contains(&format!("task {}: verified ok", pred.task))
+            || journal_lower.contains("zero revert");
+
+        match pred.confidence.to_uppercase().as_str() {
+            "HIGH" => {
+                high_total += 1;
+                if verified {
+                    high_success += 1;
+                }
+            }
+            "MEDIUM" => {
+                med_total += 1;
+                if verified {
+                    med_success += 1;
+                }
+            }
+            "LOW" => {
+                low_total += 1;
+                if verified {
+                    low_success += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let total = predictions.len();
+    println!("  Confidence Calibration ({total} predictions):\n");
+    if high_total > 0 {
+        let pct = (high_success as f64 / high_total as f64) * 100.0;
+        println!(
+            "    HIGH:   {}/{} ({:.0}%) verified",
+            high_success, high_total, pct
+        );
+    }
+    if med_total > 0 {
+        let pct = (med_success as f64 / med_total as f64) * 100.0;
+        println!(
+            "    MEDIUM: {}/{} ({:.0}%) verified",
+            med_success, med_total, pct
+        );
+    }
+    if low_total > 0 {
+        let pct = (low_success as f64 / low_total as f64) * 100.0;
+        println!(
+            "    LOW:    {}/{} ({:.0}%) verified",
+            low_success, low_total, pct
+        );
+    }
+    if high_total == 0 && med_total == 0 && low_total == 0 {
+        println!("    No predictions to calibrate.");
+    }
+    println!();
 }
 
 /// Handle the /stats command.
@@ -1377,5 +1585,31 @@ mod tests {
         assert_eq!(format!("{}", Confidence::High), "HIGH");
         assert_eq!(format!("{}", Confidence::Medium), "MEDIUM");
         assert_eq!(format!("{}", Confidence::Low), "LOW");
+    }
+
+    #[test]
+    fn test_parse_confidence_log_basic() {
+        let content = r#"{"day":19,"task":1,"title":"Extract commands_memory.rs","confidence":"HIGH"}
+{"day":19,"task":2,"title":"Symbol coupling","confidence":"MEDIUM"}"#;
+        let entries = parse_confidence_log(content);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].day, 19);
+        assert_eq!(entries[0].task, 1);
+        assert_eq!(entries[0].confidence, "HIGH");
+        assert_eq!(entries[1].confidence, "MEDIUM");
+    }
+
+    #[test]
+    fn test_parse_confidence_log_empty() {
+        assert!(parse_confidence_log("").is_empty());
+        assert!(parse_confidence_log("\n\n").is_empty());
+    }
+
+    #[test]
+    fn test_parse_confidence_log_malformed_skipped() {
+        let content = "not json\n{\"day\":19,\"task\":1,\"title\":\"t\",\"confidence\":\"LOW\"}\n";
+        let entries = parse_confidence_log(content);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].confidence, "LOW");
     }
 }

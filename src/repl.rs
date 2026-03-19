@@ -430,8 +430,8 @@ pub async fn run_repl(
                 commands::handle_stats();
                 continue;
             }
-            "/confidence" => {
-                commands::handle_confidence();
+            s if s == "/confidence" || s.starts_with("/confidence ") => {
+                commands::handle_confidence(input);
                 continue;
             }
             "/hypotheses" => {
