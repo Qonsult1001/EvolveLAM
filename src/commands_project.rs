@@ -1989,6 +1989,9 @@ pub struct ErrorLogEntry {
     /// Whether this error set was resolved by a subsequent successful build.
     /// None = unknown (old entries), Some(true) = fixed, Some(false) = not yet fixed.
     pub resolved: Option<bool>,
+    /// Which error categories were pending when the fix succeeded.
+    /// Populated when check_fix_resolution marks an entry as resolved.
+    pub fixed_categories: Vec<String>,
 }
 
 /// Append an error frequency record to `.yoyo/error_log.jsonl`.
@@ -2065,8 +2068,22 @@ pub fn check_fix_resolution() {
     if !pending_path.exists() {
         return;
     }
-    // Read and remove the pending marker
+    // Read the pending categories and remove the marker
+    let pending_cats = std::fs::read_to_string(pending_path).unwrap_or_default();
     let _ = std::fs::remove_file(pending_path);
+
+    // Build the fixed_categories JSON array
+    let fixed_cats: Vec<String> = pending_cats
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let fixed_json = if fixed_cats.is_empty() {
+        String::new()
+    } else {
+        let quoted: Vec<String> = fixed_cats.iter().map(|c| format!("\"{}\"", c)).collect();
+        format!(",\"fixed_categories\":[{}]", quoted.join(","))
+    };
 
     // Mark unresolved entries in error_log.jsonl as resolved
     let log_path = std::path::Path::new(".yoyo/error_log.jsonl");
@@ -2075,12 +2092,17 @@ pub fn check_fix_resolution() {
         Err(_) => return,
     };
 
-    // Rewrite lines, changing the last unresolved entry to resolved
+    // Rewrite lines, changing the last unresolved entry to resolved + fixed_categories
     let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
-    // Find the last line with "resolved":"false" and change it to "resolved":"true"
     for line in lines.iter_mut().rev() {
         if line.contains("\"resolved\":\"false\"") {
             *line = line.replace("\"resolved\":\"false\"", "\"resolved\":\"true\"");
+            // Insert fixed_categories before the closing brace
+            if !fixed_json.is_empty() {
+                if let Some(pos) = line.rfind('}') {
+                    line.insert_str(pos, &fixed_json);
+                }
+            }
             break;
         }
     }
@@ -2144,13 +2166,41 @@ fn parse_error_log_line(line: &str) -> Option<ErrorLogEntry> {
         "false" => Some(false),
         _ => None,
     });
+    let fixed_categories = extract_json_string_array(line, "fixed_categories");
     Some(ErrorLogEntry {
         ts,
         day,
         categories,
         source,
         resolved,
+        fixed_categories,
     })
+}
+
+/// Extract a JSON string array: `"key":["a","b"]` → vec!["a", "b"].
+fn extract_json_string_array(json: &str, key: &str) -> Vec<String> {
+    let pattern = format!("\"{}\":[", key);
+    let start = match json.find(&pattern) {
+        Some(s) => s + pattern.len(),
+        None => return Vec::new(),
+    };
+    let rest = &json[start..];
+    let end = match rest.find(']') {
+        Some(e) => e,
+        None => return Vec::new(),
+    };
+    let inner = &rest[..end];
+    inner
+        .split(',')
+        .filter_map(|s| {
+            let trimmed = s.trim().trim_matches('"');
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+        .collect()
 }
 
 /// Extract a string field from a JSON line: `"key":"value"`.
@@ -2253,9 +2303,15 @@ pub fn format_errors_display(entries: &[ErrorLogEntry]) -> String {
             .map(|(c, n)| format!("{} {}", n, c))
             .collect();
         let resolved_marker = match entry.resolved {
-            Some(true) => " ✓",
-            Some(false) => " ✗",
-            None => "",
+            Some(true) => {
+                if entry.fixed_categories.is_empty() {
+                    " ✓".to_string()
+                } else {
+                    format!(" ✓ (fixed: {})", entry.fixed_categories.join(", "))
+                }
+            }
+            Some(false) => " ✗".to_string(),
+            None => String::new(),
         };
         out.push_str(&format!(
             "    [{}] day {} — {}{}\n",

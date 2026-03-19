@@ -3414,6 +3414,7 @@ test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
                 ],
                 source: "fix".to_string(),
                 resolved: None,
+                fixed_categories: vec![],
             },
             ErrorLogEntry {
                 ts: "2026-03-19T06:00:00Z".to_string(),
@@ -3424,6 +3425,7 @@ test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
                 ],
                 source: "fix".to_string(),
                 resolved: None,
+                fixed_categories: vec![],
             },
         ];
         let totals = summarize_error_log(&entries);
@@ -3450,6 +3452,7 @@ test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
                 categories: vec![("missing_import".to_string(), 3)],
                 source: "fix".to_string(),
                 resolved: None,
+                fixed_categories: vec![],
             },
             ErrorLogEntry {
                 ts: "2026-03-19T06:00:00Z".to_string(),
@@ -3460,6 +3463,7 @@ test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
                 ],
                 source: "fix".to_string(),
                 resolved: None,
+                fixed_categories: vec![],
             },
         ];
         let display = format_errors_display(&entries);
@@ -3490,6 +3494,7 @@ test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
                 categories: vec![("missing_import".to_string(), 3)],
                 source: "fix".to_string(),
                 resolved: Some(true),
+                fixed_categories: vec![],
             },
             ErrorLogEntry {
                 ts: "t2".to_string(),
@@ -3500,6 +3505,7 @@ test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
                 ],
                 source: "fix".to_string(),
                 resolved: Some(false),
+                fixed_categories: vec![],
             },
         ];
         let rates = compute_fix_rates(&entries);
@@ -3527,6 +3533,7 @@ test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
             categories: vec![("type_mismatch".to_string(), 4)],
             source: "fix".to_string(),
             resolved: None,
+            fixed_categories: vec![],
         }];
         let rates = compute_fix_rates(&entries);
         assert_eq!(rates[0], ("type_mismatch".to_string(), 4, 0));
@@ -3541,6 +3548,7 @@ test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
                 categories: vec![("missing_import".to_string(), 3)],
                 source: "fix".to_string(),
                 resolved: Some(true),
+                fixed_categories: vec![],
             },
             ErrorLogEntry {
                 ts: "2026-03-19T06:00:00Z".to_string(),
@@ -3548,6 +3556,7 @@ test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
                 categories: vec![("missing_import".to_string(), 2)],
                 source: "fix".to_string(),
                 resolved: Some(false),
+                fixed_categories: vec![],
             },
         ];
         let display = format_errors_display(&entries);
@@ -3565,6 +3574,7 @@ test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
                 categories: vec![("unused".to_string(), 1)],
                 source: "fix".to_string(),
                 resolved: Some(true),
+                fixed_categories: vec![],
             },
             ErrorLogEntry {
                 ts: "2026-03-19T06:00:00Z".to_string(),
@@ -3572,6 +3582,7 @@ test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
                 categories: vec![("unused".to_string(), 1)],
                 source: "fix".to_string(),
                 resolved: Some(false),
+                fixed_categories: vec![],
             },
         ];
         let display = format_errors_display(&entries);
@@ -3607,6 +3618,7 @@ test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
                 categories: vec![("borrow_checker".to_string(), 1)],
                 source: "fix".to_string(),
                 resolved: Some(false),
+                fixed_categories: vec![],
             },
             ErrorLogEntry {
                 ts: "t2".to_string(),
@@ -3614,6 +3626,7 @@ test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
                 categories: vec![("borrow_checker".to_string(), 1)],
                 source: "fix".to_string(),
                 resolved: Some(false),
+                fixed_categories: vec![],
             },
         ];
         let recurring = detect_recurring_errors(&entries);
@@ -3631,6 +3644,7 @@ test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
                 categories: vec![("borrow_checker".to_string(), 1)],
                 source: "fix".to_string(),
                 resolved: Some(true),
+                fixed_categories: vec![],
             },
             ErrorLogEntry {
                 ts: "t2".to_string(),
@@ -3638,10 +3652,44 @@ test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
                 categories: vec![("borrow_checker".to_string(), 1)],
                 source: "fix".to_string(),
                 resolved: Some(true),
+                fixed_categories: vec![],
             },
         ];
         let recurring = detect_recurring_errors(&entries);
         assert!(recurring.is_empty());
+    }
+
+    #[test]
+    fn test_parse_error_log_with_fixed_categories() {
+        let line = r#"{"ts":"2026-03-19T10:00:00Z","day":19,"categories":{"missing_import":2},"source":"fix","resolved":"true","fixed_categories":["missing_import","borrow_checker"]}"#;
+        let entries = parse_error_log(line);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].resolved, Some(true));
+        assert_eq!(entries[0].fixed_categories.len(), 2);
+        assert_eq!(entries[0].fixed_categories[0], "missing_import");
+        assert_eq!(entries[0].fixed_categories[1], "borrow_checker");
+    }
+
+    #[test]
+    fn test_parse_error_log_without_fixed_categories() {
+        let line = r#"{"ts":"2026-03-19T10:00:00Z","day":19,"categories":{"missing_import":2},"source":"fix","resolved":"false"}"#;
+        let entries = parse_error_log(line);
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].fixed_categories.is_empty());
+    }
+
+    #[test]
+    fn test_format_errors_display_shows_fixed_categories() {
+        let entries = vec![ErrorLogEntry {
+            ts: "2026-03-19T10:00:00Z".to_string(),
+            day: 19,
+            categories: vec![("missing_import".to_string(), 2)],
+            source: "fix".to_string(),
+            resolved: Some(true),
+            fixed_categories: vec!["missing_import".to_string()],
+        }];
+        let display = format_errors_display(&entries);
+        assert!(display.contains("fixed: missing_import"));
     }
 
     #[test]
