@@ -18,8 +18,8 @@ pub use crate::commands_git::{
 // Project-related handlers
 pub use crate::commands_project::{
     handle_ast, handle_context, handle_coupling, handle_docs, handle_errors, handle_find,
-    handle_fix, handle_health, handle_hypotheses, handle_index, handle_init, handle_lint,
-    handle_run, handle_run_usage, handle_test, handle_tree,
+    handle_fix, handle_gap, handle_health, handle_hypotheses, handle_index, handle_init,
+    handle_lint, handle_run, handle_run_usage, handle_test, handle_tree,
 };
 
 // Session-related handlers
@@ -54,6 +54,9 @@ mod tests {
         run_health_checks_with_classification, run_shell_command, scan_important_dirs,
         scan_important_files, summarize_error_log, test_command_for_project, ErrorLogEntry,
         GenericErrorCategory, Hypothesis, IndexEntry, ProjectType, RustErrorCategory, TestSummary,
+    };
+    use crate::commands_project::{
+        collect_gap_stats, format_gap_stats, round_to_hundreds, GapStats,
     };
     use crate::commands_session::{
         parse_bookmark_name, parse_spawn_subcommand, Bookmarks, SpawnCommand, SpawnHistory,
@@ -3362,5 +3365,43 @@ test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
             format!("{}", GenericErrorCategory::UndefinedSymbol),
             "undefined_symbol"
         );
+    }
+
+    // ── /gap tests ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_round_to_hundreds() {
+        assert_eq!(round_to_hundreds(24774), "24,800");
+        assert_eq!(round_to_hundreds(100), "0,100");
+        assert_eq!(round_to_hundreds(0), "0,000");
+        assert_eq!(round_to_hundreds(999), "1,000");
+        assert_eq!(round_to_hundreds(1050), "1,100");
+    }
+
+    #[test]
+    fn test_collect_gap_stats_has_data() {
+        let stats = collect_gap_stats();
+        // We know this codebase has source files and tests
+        assert!(stats.file_count > 0);
+        assert!(stats.total_lines > 0);
+        assert!(stats.unit_tests > 0);
+        assert!(stats.command_count > 40);
+    }
+
+    #[test]
+    fn test_format_gap_stats() {
+        let stats = GapStats {
+            file_count: 17,
+            total_lines: 25000,
+            command_count: 51,
+            unit_tests: 750,
+            integration_tests: 68,
+        };
+        let formatted = format_gap_stats(&stats);
+        assert!(formatted.contains("17"));
+        assert!(formatted.contains("750"));
+        assert!(formatted.contains("68"));
+        assert!(formatted.contains("818"));
+        assert!(formatted.contains("51"));
     }
 }

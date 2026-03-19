@@ -26,6 +26,7 @@ pub const KNOWN_COMMANDS: &[&str] = &[
     "/find",
     "/fix",
     "/forget",
+    "/gap",
     "/index",
     "/status",
     "/tokens",
@@ -247,6 +248,7 @@ pub fn help_text() -> String {
     out.push_str("  /tree [depth]      Show project directory tree (default depth: 3)\n");
     out.push_str("  /ast <pattern>     Search code symbols (fn, struct, trait, class, etc.)\n");
     out.push_str("  /coupling          Show file coupling map (use crate:: imports)\n");
+    out.push_str("  /gap               Show gap analysis stats and update CLAUDE_CODE_GAP.md\n");
     out.push('\n');
 
     // ── AI ──

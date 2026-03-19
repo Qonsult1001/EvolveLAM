@@ -426,6 +426,10 @@ pub async fn run_repl(
                 commands::handle_errors();
                 continue;
             }
+            "/gap" => {
+                commands::handle_gap();
+                continue;
+            }
             "/stats" => {
                 commands::handle_stats();
                 continue;
