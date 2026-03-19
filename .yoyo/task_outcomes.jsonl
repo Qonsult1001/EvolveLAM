@@ -12,3 +12,4 @@
 {"day": 19, "task_num": 2, "title": "Runtime error pattern detection", "outcome": "verified"}
 {"day": 19, "task_num": 3, "title": "`/runtime-errors` subcommands (clear, summary)", "outcome": "verified"}
 {"day": 19, "task_num": 4, "title": "Deduplicate runtime error messages before logging", "outcome": "verified"}
+{"day": 19, "task_num": 5, "title": "Wire runtime error patterns into evolution planning prompt", "outcome": "verified"}
