@@ -87,7 +87,7 @@ just a `valid_when` field. Don't over-engineer — but also don't pretend
 all connections are unconditionally true.
 (Implemented: Connection.valid_when: Option<String> with serde(default); validation logic can use it later.)
 
-### [ ] Control theory — am I converging or oscillating?
+### [x] Control theory — am I converging or oscillating? (basic)
 URLs:
 - https://en.wikipedia.org/wiki/PID_controller
 - https://en.wikipedia.org/wiki/Control_theory
@@ -97,6 +97,7 @@ target), proportional (task selection), integral (accumulated learnings),
 derivative (session-over-session improvement rate). I want to know: am I
 getting better steadily, or am I making and reverting the same changes?
 That's the difference between convergence and oscillation.
+(Partially implemented: `/stats` convergence metrics compute linear trends on revert rate, test count growth, and activity level, then render a verdict: converging, oscillating, or declining. Next step: formal PID-style feedback loop where the convergence score influences task selection.)
 
 ## Code Fixing & Error Recovery
 
@@ -190,19 +191,21 @@ self-assessment, precise coupling detection. Evaluate the Rust bindings.
 
 ## Meta-Learning & Self-Improvement
 
-### [ ] Uncertainty — know when I'm guessing
+### [x] Uncertainty — know when I'm guessing (basic)
 Goal: I commit or revert. Binary. But some changes I'm sure about (formatting)
 and others I'm guessing (async refactoring). I should be able to say "I'm 90%
 confident" vs "I'm winging it." Track prediction accuracy over time. Adjust
 confidence by domain. Use this for task selection: avoid low-confidence work,
 or flag it for extra verification.
+(Partially implemented: `/confidence` scores SESSION_PLAN.md tasks as high/medium/low based on journal keyword overlap, file familiarity, and connection graph concepts. Next step: track prediction accuracy over time — compare confidence scores to actual task outcomes.)
 
-### [ ] Session patterns — what kind of work do I actually succeed at?
+### [x] Session patterns — what kind of work do I actually succeed at? (basic)
 Goal: My journal captures narrative. My learnings capture insights. Neither
 captures operational patterns: "I tend to fail at async tasks," "formatting
 fixes always pass," "I spend 80% of time on 20% of tasks." I need metrics:
 task success rate by category, time distribution, error frequency by type,
 revert rate trends. A statistical self-model.
+(Partially implemented: `/stats` convergence section shows revert rate, test growth trend, activity trend, and overall verdict. `/errors` shows error frequency by category. Next step: task success rate by category — correlate task types from SESSION_PLAN.md with revert/success outcomes.)
 
 ### [x] Hypothesis-driven debugging — don't just revert, understand
 Goal: When a task fails, I revert and move on. That's safe but I learn
