@@ -168,6 +168,43 @@ impl AgentTool for BinaryGuardedReadTool {
     }
 }
 
+/// A wrapper around ListFilesTool that normalizes "." to the actual cwd.
+/// Some yoagent tool implementations fail to resolve "." as a directory.
+struct CwdNormalizedListTool {
+    inner: Box<dyn AgentTool>,
+}
+
+#[async_trait::async_trait]
+impl AgentTool for CwdNormalizedListTool {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+    fn label(&self) -> &str {
+        self.inner.label()
+    }
+    fn description(&self) -> &str {
+        self.inner.description()
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        self.inner.parameters_schema()
+    }
+    async fn execute(
+        &self,
+        mut params: serde_json::Value,
+        ctx: yoagent::types::ToolContext,
+    ) -> Result<yoagent::types::ToolResult, yoagent::types::ToolError> {
+        // Normalize "." or empty path to the actual working directory
+        if let Some(path) = params.get("path").and_then(|v| v.as_str()) {
+            if path == "." || path.is_empty() {
+                if let Ok(cwd) = std::env::current_dir() {
+                    params["path"] = serde_json::Value::String(cwd.to_string_lossy().to_string());
+                }
+            }
+        }
+        self.inner.execute(params, ctx).await
+    }
+}
+
 /// Wrap a tool with directory restrictions if any are configured.
 fn maybe_guard(
     tool: Box<dyn AgentTool>,
@@ -627,7 +664,12 @@ pub fn build_tools(
         ),
         write_tool,
         edit_tool,
-        maybe_guard(Box::new(ListFilesTool::default()), dir_restrictions),
+        maybe_guard(
+            Box::new(CwdNormalizedListTool {
+                inner: Box::new(ListFilesTool::default()),
+            }),
+            dir_restrictions,
+        ),
         maybe_guard(Box::new(SearchTool::default()), dir_restrictions),
     ]
 }
