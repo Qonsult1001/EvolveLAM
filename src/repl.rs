@@ -266,6 +266,7 @@ pub async fn run_repl(
 
     let mut session_total = Usage::default();
     let mut last_input: Option<String> = None;
+    let mut spawn_history = crate::commands_session::SpawnHistory::new();
     let mut bookmarks = commands::load_bookmarks();
     if !bookmarks.is_empty() {
         println!(
@@ -586,6 +587,7 @@ pub async fn run_repl(
                     agent_config,
                     &mut session_total,
                     &agent_config.model,
+                    &mut spawn_history,
                 )
                 .await
                 {

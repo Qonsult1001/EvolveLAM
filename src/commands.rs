@@ -103,6 +103,9 @@ pub const GIT_SUBCOMMANDS: &[&str] = &["status", "log", "add", "diff", "branch",
 pub const PR_SUBCOMMANDS: &[&str] = &["list", "view", "diff", "comment", "create", "checkout"];
 
 /// Graph subcommand names for `/graph <Tab>` completion.
+/// Spawn subcommand names for `/spawn <Tab>` completion.
+pub const SPAWN_SUBCOMMANDS: &[&str] = &["list", "result"];
+
 pub const GRAPH_SUBCOMMANDS: &[&str] = &[
     "downstream",
     "neighbors",
@@ -127,6 +130,7 @@ pub fn command_arg_completions(cmd: &str, partial_arg: &str) -> Vec<String> {
         "/pr" => filter_candidates(PR_SUBCOMMANDS, &partial_lower),
         "/provider" => filter_candidates(KNOWN_PROVIDERS, &partial_lower),
         "/graph" => filter_candidates(GRAPH_SUBCOMMANDS, &partial_lower),
+        "/spawn" => filter_candidates(SPAWN_SUBCOMMANDS, &partial_lower),
         "/save" | "/load" => list_json_files(partial_arg),
         _ => Vec::new(),
     }
@@ -1024,7 +1028,9 @@ mod tests {
         scan_important_files, summarize_error_log, test_command_for_project, ErrorLogEntry,
         GenericErrorCategory, Hypothesis, IndexEntry, ProjectType, RustErrorCategory, TestSummary,
     };
-    use crate::commands_session::{parse_bookmark_name, parse_spawn_task, Bookmarks};
+    use crate::commands_session::{
+        parse_bookmark_name, parse_spawn_subcommand, Bookmarks, SpawnCommand, SpawnHistory,
+    };
     use crate::memory::{
         format_memories_for_prompt, load_memories_from, MemoryEntry, ProjectMemory,
     };
@@ -2102,30 +2108,85 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_spawn_task_with_task() {
-        let task = parse_spawn_task("/spawn read src/main.rs and summarize");
-        assert_eq!(task, Some("read src/main.rs and summarize".to_string()));
-    }
-
-    #[test]
-    fn test_parse_spawn_task_empty() {
-        let task = parse_spawn_task("/spawn");
-        assert_eq!(task, None);
-    }
-
-    #[test]
-    fn test_parse_spawn_task_whitespace_only() {
-        let task = parse_spawn_task("/spawn   ");
-        assert_eq!(task, None);
-    }
-
-    #[test]
-    fn test_parse_spawn_task_preserves_full_task() {
-        let task = parse_spawn_task("/spawn analyze src/ and list all public functions");
+    fn test_parse_spawn_subcommand_task() {
+        let cmd = parse_spawn_subcommand("/spawn read src/main.rs and summarize");
         assert_eq!(
-            task,
-            Some("analyze src/ and list all public functions".to_string())
+            cmd,
+            SpawnCommand::Task("read src/main.rs and summarize".to_string())
         );
+    }
+
+    #[test]
+    fn test_parse_spawn_subcommand_empty() {
+        let cmd = parse_spawn_subcommand("/spawn");
+        assert_eq!(cmd, SpawnCommand::Help);
+    }
+
+    #[test]
+    fn test_parse_spawn_subcommand_list() {
+        let cmd = parse_spawn_subcommand("/spawn list");
+        assert_eq!(cmd, SpawnCommand::List);
+    }
+
+    #[test]
+    fn test_parse_spawn_subcommand_ls() {
+        let cmd = parse_spawn_subcommand("/spawn ls");
+        assert_eq!(cmd, SpawnCommand::List);
+    }
+
+    #[test]
+    fn test_parse_spawn_subcommand_result() {
+        let cmd = parse_spawn_subcommand("/spawn result 3");
+        assert_eq!(cmd, SpawnCommand::ShowResult(3));
+    }
+
+    #[test]
+    fn test_spawn_history_add_and_get() {
+        let mut history = SpawnHistory::new();
+        assert_eq!(history.len(), 0);
+        let id = history.add("test task".to_string(), "test result".to_string());
+        assert_eq!(id, 1);
+        assert_eq!(history.len(), 1);
+        let record = history.get(1).unwrap();
+        assert_eq!(record.task, "test task");
+        assert_eq!(record.result, "test result");
+    }
+
+    #[test]
+    fn test_spawn_history_format_list_empty() {
+        let history = SpawnHistory::new();
+        let display = history.format_list();
+        assert!(display.contains("No spawns"));
+    }
+
+    #[test]
+    fn test_spawn_history_format_list_with_entries() {
+        let mut history = SpawnHistory::new();
+        history.add("first task".to_string(), "first result".to_string());
+        history.add("second task".to_string(), "second result".to_string());
+        let display = history.format_list();
+        assert!(display.contains("2 spawn(s)"));
+        assert!(display.contains("#1"));
+        assert!(display.contains("#2"));
+    }
+
+    #[test]
+    fn test_spawn_history_aggregate() {
+        let mut history = SpawnHistory::new();
+        history.add("task one".to_string(), "result one".to_string());
+        history.add("task two".to_string(), "result two".to_string());
+        let agg = history.aggregate(&[1, 2]);
+        assert!(agg.contains("Spawn #1"));
+        assert!(agg.contains("Spawn #2"));
+        assert!(agg.contains("result one"));
+        assert!(agg.contains("result two"));
+    }
+
+    #[test]
+    fn test_spawn_history_aggregate_missing_ids() {
+        let history = SpawnHistory::new();
+        let agg = history.aggregate(&[99]);
+        assert!(agg.contains("no matching"));
     }
 
     #[test]

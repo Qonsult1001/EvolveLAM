@@ -335,69 +335,204 @@ pub fn handle_marks(bookmarks: &Bookmarks) {
 
 // ── /spawn ────────────────────────────────────────────────────────────────
 
-/// Parse the task from a `/spawn <task>` input.
-/// Returns None if no task is provided.
-pub fn parse_spawn_task(input: &str) -> Option<String> {
-    let task = input
-        .strip_prefix("/spawn")
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    if task.is_empty() {
-        None
-    } else {
-        Some(task)
+/// A completed spawn record for history tracking.
+#[derive(Debug, Clone)]
+pub struct SpawnRecord {
+    pub id: usize,
+    pub task: String,
+    pub result: String,
+    pub timestamp: String,
+}
+
+/// Spawn history — tracks all completed subagent runs in this session.
+pub struct SpawnHistory {
+    records: Vec<SpawnRecord>,
+}
+
+impl SpawnHistory {
+    pub fn new() -> Self {
+        Self {
+            records: Vec::new(),
+        }
     }
+
+    pub fn add(&mut self, task: String, result: String) -> usize {
+        let id = self.records.len() + 1;
+        let timestamp = simple_time_stamp();
+        self.records.push(SpawnRecord {
+            id,
+            task,
+            result,
+            timestamp,
+        });
+        id
+    }
+
+    pub fn get(&self, id: usize) -> Option<&SpawnRecord> {
+        self.records.iter().find(|r| r.id == id)
+    }
+
+    pub fn len(&self) -> usize {
+        self.records.len()
+    }
+
+    /// Format all records for display.
+    pub fn format_list(&self) -> String {
+        if self.records.is_empty() {
+            return "  No spawns this session.\n".to_string();
+        }
+        let mut out = String::new();
+        out.push_str(&format!(
+            "  {} spawn(s) this session:\n",
+            self.records.len()
+        ));
+        for r in &self.records {
+            let task_preview = crate::format::truncate_with_ellipsis(&r.task, 60);
+            let result_preview = crate::format::truncate_with_ellipsis(
+                r.result.lines().next().unwrap_or("(empty)"),
+                50,
+            );
+            out.push_str(&format!(
+                "  #{} [{}] {}\n     → {}\n",
+                r.id, r.timestamp, task_preview, result_preview
+            ));
+        }
+        out
+    }
+
+    /// Aggregate results from multiple spawns into a summary.
+    pub fn aggregate(&self, ids: &[usize]) -> String {
+        let mut out = String::new();
+        let records: Vec<_> = ids.iter().filter_map(|id| self.get(*id)).collect();
+        if records.is_empty() {
+            return "(no matching spawn results)".to_string();
+        }
+        for r in &records {
+            out.push_str(&format!("## Spawn #{}: {}\n{}\n\n", r.id, r.task, r.result));
+        }
+        out
+    }
+}
+
+/// Simple HH:MM timestamp without chrono dependency.
+fn simple_time_stamp() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let hours = (now % 86400) / 3600;
+    let minutes = (now % 3600) / 60;
+    format!("{hours:02}:{minutes:02}")
+}
+
+/// Parsed /spawn subcommand.
+#[derive(Debug, PartialEq)]
+pub enum SpawnCommand {
+    Help,
+    List,
+    ShowResult(usize),
+    Task(String),
+}
+
+/// Parse spawn subcommand: `/spawn list`, `/spawn result <id>`, or `/spawn <task>`.
+pub fn parse_spawn_subcommand(input: &str) -> SpawnCommand {
+    let rest = input.strip_prefix("/spawn").unwrap_or("").trim();
+    if rest == "list" || rest == "ls" {
+        SpawnCommand::List
+    } else if let Some(id_str) = rest.strip_prefix("result ").or(rest.strip_prefix("show ")) {
+        if let Ok(id) = id_str.trim().parse::<usize>() {
+            SpawnCommand::ShowResult(id)
+        } else {
+            SpawnCommand::Task(rest.to_string())
+        }
+    } else if rest.is_empty() {
+        SpawnCommand::Help
+    } else {
+        SpawnCommand::Task(rest.to_string())
+    }
+}
+
+/// Display spawn help.
+pub fn print_spawn_help() {
+    println!("{DIM}  usage: /spawn <task>          Run task in fresh subagent context");
+    println!("         /spawn list             Show completed spawns this session");
+    println!("         /spawn result <id>      Show full result of spawn #id");
+    println!("  Example: /spawn read src/main.rs and summarize the architecture{RESET}\n");
 }
 
 /// Handle the /spawn command: create a fresh subagent, run a task, and return the result.
 /// The subagent gets its own independent context window so complex tasks don't pollute
-/// the main conversation.
+/// the main conversation. Now with history tracking and subcommands.
 /// Returns Some(context_msg) to be injected back into the main conversation, or None.
 pub async fn handle_spawn(
     input: &str,
     agent_config: &crate::AgentConfig,
     session_total: &mut Usage,
     model: &str,
+    history: &mut SpawnHistory,
 ) -> Option<String> {
-    let task = match parse_spawn_task(input) {
-        Some(t) => t,
-        None => {
-            println!("{DIM}  usage: /spawn <task>");
-            println!("  Spawn a subagent with a fresh context to handle a task.");
-            println!("  The result is summarized back into your main conversation.");
-            println!("  Example: /spawn read src/main.rs and summarize the architecture{RESET}\n");
-            return None;
+    match parse_spawn_subcommand(input) {
+        SpawnCommand::Help => {
+            print_spawn_help();
+            None
         }
-    };
+        SpawnCommand::List => {
+            let display = history.format_list();
+            println!("{DIM}{display}{RESET}\n");
+            None
+        }
+        SpawnCommand::ShowResult(id) => {
+            if id == 0 {
+                // /spawn result 0 → show all aggregated
+                let all_ids: Vec<usize> = (1..=history.len()).collect();
+                let agg = history.aggregate(&all_ids);
+                println!("{agg}");
+            } else if let Some(record) = history.get(id) {
+                println!("{DIM}  Spawn #{}: {}{RESET}", record.id, record.task);
+                println!("{DIM}  Completed: {}{RESET}\n", record.timestamp);
+                println!("{}", record.result);
+            } else {
+                println!(
+                    "{DIM}  No spawn with id #{id}. Use /spawn list to see available.{RESET}\n"
+                );
+            }
+            None
+        }
+        SpawnCommand::Task(task) => {
+            println!(
+                "{CYAN}  🐙 spawning subagent #{}...{RESET}",
+                history.len() + 1
+            );
+            println!(
+                "{DIM}  task: {}{RESET}",
+                crate::format::truncate_with_ellipsis(&task, 100)
+            );
 
-    println!("{CYAN}  🐙 spawning subagent...{RESET}");
-    println!(
-        "{DIM}  task: {}{RESET}",
-        crate::format::truncate_with_ellipsis(&task, 100)
-    );
+            // Build a fresh agent with the same config but independent context
+            let mut sub_agent = agent_config.build_agent();
 
-    // Build a fresh agent with the same config but independent context
-    let mut sub_agent = agent_config.build_agent();
+            // Run the task as a single prompt on the subagent
+            let response = run_prompt(&mut sub_agent, &task, session_total, model).await;
 
-    // Run the task as a single prompt on the subagent
-    let response = run_prompt(&mut sub_agent, &task, session_total, model).await;
+            let result_text = if response.trim().is_empty() {
+                "(no output)".to_string()
+            } else {
+                response.trim().to_string()
+            };
 
-    println!("\n{GREEN}  ✓ subagent completed{RESET}");
-    println!("{DIM}  injecting result into main conversation...{RESET}\n");
+            let id = history.add(task.clone(), result_text.clone());
 
-    // Build a context message for the main agent summarizing what the subagent did
-    let result_text = if response.trim().is_empty() {
-        "(no output)".to_string()
-    } else {
-        response.trim().to_string()
-    };
+            println!("\n{GREEN}  ✓ subagent #{id} completed{RESET}");
+            println!("{DIM}  injecting result into main conversation...{RESET}");
+            println!("{DIM}  use /spawn result {id} to see full output later{RESET}\n");
 
-    let context_msg = format!(
-        "A subagent just completed a task. Here is its result:\n\n**Task:** {task}\n\n**Result:**\n{result_text}"
-    );
+            let context_msg = format!(
+                "Subagent #{id} just completed a task. Here is its result:\n\n**Task:** {task}\n\n**Result:**\n{result_text}"
+            );
 
-    Some(context_msg)
+            Some(context_msg)
+        }
+    }
 }
 
 // ── /stats ──────────────────────────────────────────────────────────────
