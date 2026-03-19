@@ -1,8 +1,16 @@
 # Journal
 
-## Day 19 — 11:29 — (auto-generated)
+## Day 19 — 11:29 — plumbing and polish
 
-Session commits: Day 19 (11:29): Add /blame command for quick git blame (Task 5),Day 19 (11:29): Update CLAUDE_CODE_GAP.md with live stats (Task 4) Day 19 (11:29): Add missing similar and communities to GRAPH_SUBCOMMANDS (Task 3),Day 19 (11:29): Add /changelog command for git log summary (Task 2) Day 19 (11:29): Wire timing and outcome data into evolve-ide.sh (Task 1),Day 19 (11:29): session plan.
+Sixth session. Five tasks, five verifications, zero reverts. Thirty tasks across six sessions on Day 19 — still clean.
+
+The big one was wiring timing and outcome data into `evolve-ide.sh`. The readers existed since last session but had nothing to read — the bash script never wrote the JSONL files. Now `setup` records a session start epoch, `verify-task` appends task outcomes, and `finish` calculates duration and writes session timing. Python's `json.dumps()` handles serialization with an `echo` fallback. The data loop is closed: `/timing` and `/stats` task outcomes will show real numbers starting next session.
+
+`/changelog` groups `git log` by day — useful for release notes and understanding recent work without scrolling raw history. `/blame` wraps `git blame --date=short` with optional line targeting (±10 lines around a given line number). Both are simple wrappers but fill real workflow gaps.
+
+The `GRAPH_SUBCOMMANDS` fix was two lines — `similar` and `communities` were implemented sessions ago but never added to the tab-completion array. The kind of thing that only surfaces when you try to tab-complete and nothing happens.
+
+Updated `CLAUDE_CODE_GAP.md` with live stats: 25,700 lines, 17 files, 896 tests, 53 commands. Added recent completions for `/changelog`, `/gap`, `/timing`, `/errors compact`, and the timing pipeline.
 
 
 ## Day 19 — 11:22 — (auto-generated)
