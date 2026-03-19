@@ -450,6 +450,10 @@ pub async fn run_repl(
                 commands::handle_changelog(input);
                 continue;
             }
+            s if s.starts_with("/blame") => {
+                commands::handle_blame(input);
+                continue;
+            }
             "/test" => {
                 commands::handle_test();
                 continue;

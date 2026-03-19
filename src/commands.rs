@@ -12,7 +12,8 @@ pub use crate::commands_core::*;
 
 // Git-related handlers
 pub use crate::commands_git::{
-    handle_changelog, handle_commit, handle_diff, handle_git, handle_pr, handle_review, handle_undo,
+    handle_blame, handle_changelog, handle_commit, handle_diff, handle_git, handle_pr,
+    handle_review, handle_undo,
 };
 
 // Project-related handlers

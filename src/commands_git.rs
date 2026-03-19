@@ -867,6 +867,63 @@ pub fn handle_changelog(input: &str) {
     }
 }
 
+// ── /blame ──────────────────────────────────────────────────────────────
+
+pub fn handle_blame(input: &str) {
+    let arg = input.strip_prefix("/blame").unwrap_or("").trim();
+
+    if arg.is_empty() {
+        println!("{RED}  usage: /blame <file> [line]{RESET}\n");
+        return;
+    }
+
+    let parts: Vec<&str> = arg.splitn(2, ' ').collect();
+    let file = parts[0];
+    let line_num: Option<u32> = parts.get(1).and_then(|s| s.parse().ok());
+
+    if !std::path::Path::new(file).exists() {
+        println!("{RED}  file not found: {file}{RESET}\n");
+        return;
+    }
+
+    let mut args = vec!["blame", "--date=short"];
+
+    // If a line number is specified, show a range of ±10 lines around it
+    let range_arg;
+    if let Some(line) = line_num {
+        let start = line.saturating_sub(10).max(1);
+        let end = line + 10;
+        range_arg = format!("-L{start},{end}");
+        args.push(&range_arg);
+    }
+
+    args.push(file);
+
+    let output = std::process::Command::new("git").args(&args).output();
+
+    match output {
+        Ok(o) if o.status.success() => {
+            let blame = String::from_utf8_lossy(&o.stdout);
+            if blame.trim().is_empty() {
+                println!("{DIM}  no blame output (file may be untracked){RESET}\n");
+            } else {
+                println!();
+                for line in blame.lines() {
+                    println!("  {line}");
+                }
+                println!();
+            }
+        }
+        Ok(o) => {
+            let err = String::from_utf8_lossy(&o.stderr);
+            println!("{RED}  git blame failed: {err}{RESET}\n");
+        }
+        Err(e) => {
+            println!("{RED}  error: {e}{RESET}\n");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
