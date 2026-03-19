@@ -235,7 +235,7 @@ and reveals what's missing before I build more features on top of an
 empty substrate.
 (Implemented: `/graph populate` reads learnings.jsonl, extracts concepts, creates semantic connections. `/graph stats` shows graph health.)
 
-### [ ] Wire timing and outcome data into evolve-ide.sh
+### [x] Wire timing and outcome data into evolve-ide.sh
 Goal: `/timing` and task outcome tracking now have readers and formatters,
 but no writers. `evolve-ide.sh` needs to: (1) record session start time
 during `setup`, (2) write `{day, session_time, duration_secs, tasks_completed,
@@ -243,6 +243,7 @@ tasks_reverted}` to `.yoyo/session_timing.jsonl` during `finish`, (3) write
 `{day, task_num, title, outcome}` to `.yoyo/task_outcomes.jsonl` during
 `verify-task`. Without these writes, the commands show "no data." This is
 an integration task, not a Rust task — it modifies a bash script.
+(Implemented: setup writes session_start epoch; verify-task appends task outcomes via python3 json.dumps; finish calculates duration and writes session timing. Fallback echo for non-Python environments.)
 
 ### [ ] Calibration scoring — am I overconfident or underconfident?
 Goal: `/confidence accuracy` now correlates predictions with outcomes, but
