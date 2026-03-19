@@ -68,6 +68,7 @@ pub const KNOWN_COMMANDS: &[&str] = &[
     "/timing",
     "/changelog",
     "/blame",
+    "/runtime-errors",
 ];
 
 /// Well-known model names for `/model <Tab>` completion.
@@ -257,6 +258,7 @@ pub fn help_text() -> String {
     out.push_str("  /timing            Show session duration history\n");
     out.push_str("  /changelog [N]     Git changelog grouped by day (default: 7 days)\n");
     out.push_str("  /blame <file> [L]  Git blame for a file (optionally centered on line L)\n");
+    out.push_str("  /runtime-errors    Show runtime error log (tool failures, API errors)\n");
     out.push('\n');
 
     // ── AI ──

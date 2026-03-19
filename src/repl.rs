@@ -454,6 +454,10 @@ pub async fn run_repl(
                 commands::handle_blame(input);
                 continue;
             }
+            "/runtime-errors" => {
+                commands::handle_runtime_errors();
+                continue;
+            }
             "/test" => {
                 commands::handle_test();
                 continue;

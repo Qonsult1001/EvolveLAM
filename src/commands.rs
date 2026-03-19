@@ -20,7 +20,7 @@ pub use crate::commands_git::{
 pub use crate::commands_project::{
     handle_ast, handle_context, handle_coupling, handle_docs, handle_errors, handle_find,
     handle_fix, handle_gap, handle_health, handle_hypotheses, handle_index, handle_init,
-    handle_lint, handle_run, handle_run_usage, handle_test, handle_tree,
+    handle_lint, handle_run, handle_run_usage, handle_runtime_errors, handle_test, handle_tree,
 };
 
 // Session-related handlers
@@ -3451,5 +3451,56 @@ test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
             truncate_category("a_very_long_category_name_here", 22),
             "a_very_long_category_…"
         );
+    }
+
+    #[test]
+    fn test_parse_runtime_errors_basic() {
+        use crate::commands_project::parse_runtime_errors;
+        let content = r#"{"ts":"2026-03-19T12:00:00Z","category":"tool_failure","tool":"bash","message":"command failed"}
+{"ts":"2026-03-19T12:01:00Z","category":"api_error","message":"429 Too Many Requests"}"#;
+        let entries = parse_runtime_errors(content);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].category, "tool_failure");
+        assert_eq!(entries[0].tool, Some("bash".to_string()));
+        assert_eq!(entries[1].category, "api_error");
+        assert_eq!(entries[1].tool, None);
+    }
+
+    #[test]
+    fn test_parse_runtime_errors_empty() {
+        use crate::commands_project::parse_runtime_errors;
+        let entries = parse_runtime_errors("");
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn test_format_runtime_errors_display_empty() {
+        use crate::commands_project::format_runtime_errors_display;
+        let display = format_runtime_errors_display(&[]);
+        assert!(display.contains("No runtime errors"));
+    }
+
+    #[test]
+    fn test_format_runtime_errors_display_with_data() {
+        use crate::commands_project::{format_runtime_errors_display, RuntimeError};
+        let entries = vec![
+            RuntimeError {
+                ts: "2026-03-19T12:00:00Z".to_string(),
+                category: "tool_failure".to_string(),
+                tool: Some("list_files".to_string()),
+                message: "Directory not found: .".to_string(),
+            },
+            RuntimeError {
+                ts: "2026-03-19T12:01:00Z".to_string(),
+                category: "api_error".to_string(),
+                tool: None,
+                message: "429 Too Many Requests".to_string(),
+            },
+        ];
+        let display = format_runtime_errors_display(&entries);
+        assert!(display.contains("2 total"));
+        assert!(display.contains("tool_failure"));
+        assert!(display.contains("api_error"));
+        assert!(display.contains("list_files"));
     }
 }

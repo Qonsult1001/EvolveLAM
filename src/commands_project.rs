@@ -2872,3 +2872,121 @@ pub fn handle_gap() {
     }
     println!("{RESET}");
 }
+
+// ── /runtime-errors ─────────────────────────────────────────────────────
+
+/// A parsed runtime error entry from `.yoyo/runtime_errors.jsonl`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RuntimeError {
+    pub ts: String,
+    pub category: String,
+    pub tool: Option<String>,
+    pub message: String,
+}
+
+/// Parse runtime error entries from JSONL content.
+pub fn parse_runtime_errors(content: &str) -> Vec<RuntimeError> {
+    let mut entries = Vec::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let ts = extract_json_string(line, "ts").unwrap_or_default();
+        let category = extract_json_string(line, "category").unwrap_or_default();
+        let message = extract_json_string(line, "message").unwrap_or_default();
+        let tool = extract_json_string(line, "tool");
+        if !category.is_empty() {
+            entries.push(RuntimeError {
+                ts,
+                category,
+                tool,
+                message,
+            });
+        }
+    }
+    entries
+}
+
+/// Format runtime errors as a display summary.
+pub fn format_runtime_errors_display(entries: &[RuntimeError]) -> String {
+    if entries.is_empty() {
+        return "  No runtime errors logged.\n  (Errors are logged when tool failures, API errors, or stream interruptions occur during sessions.)\n".to_string();
+    }
+
+    let mut out = String::new();
+    let total = entries.len();
+
+    // Count by category
+    let mut by_category: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for e in entries {
+        *by_category.entry(&e.category).or_default() += 1;
+    }
+
+    out.push_str(&format!("  Runtime errors: {total} total\n\n"));
+
+    // Category breakdown
+    out.push_str("  By category:\n");
+    let mut cats: Vec<_> = by_category.iter().collect();
+    cats.sort_by(|a, b| b.1.cmp(a.1));
+    for (cat, count) in &cats {
+        out.push_str(&format!("    {cat:<20} {count}\n"));
+    }
+
+    // Tool failure breakdown (if any)
+    let tool_failures: Vec<_> = entries
+        .iter()
+        .filter(|e| e.category == "tool_failure")
+        .collect();
+    if !tool_failures.is_empty() {
+        let mut by_tool: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        for e in &tool_failures {
+            let tool = e.tool.as_deref().unwrap_or("unknown");
+            *by_tool.entry(tool).or_default() += 1;
+        }
+        out.push_str("\n  Tool failures by tool:\n");
+        let mut tools: Vec<_> = by_tool.iter().collect();
+        tools.sort_by(|a, b| b.1.cmp(a.1));
+        for (tool, count) in &tools {
+            out.push_str(&format!("    {tool:<20} {count}\n"));
+        }
+    }
+
+    // Recent entries (last 10)
+    out.push_str("\n  Recent errors:\n");
+    let recent = if entries.len() > 10 {
+        &entries[entries.len() - 10..]
+    } else {
+        entries
+    };
+    for e in recent {
+        let tool_str = e
+            .tool
+            .as_deref()
+            .map(|t| format!(" [{t}]"))
+            .unwrap_or_default();
+        let msg_preview = if e.message.len() > 80 {
+            format!("{}…", &e.message[..79])
+        } else {
+            e.message.clone()
+        };
+        out.push_str(&format!(
+            "    {} {}{}: {}\n",
+            &e.ts[..10.min(e.ts.len())],
+            e.category,
+            tool_str,
+            msg_preview
+        ));
+    }
+
+    out
+}
+
+/// Handle the /runtime-errors command.
+pub fn handle_runtime_errors() {
+    let path = std::path::Path::new(".yoyo/runtime_errors.jsonl");
+    let content = std::fs::read_to_string(path).unwrap_or_default();
+    let entries = parse_runtime_errors(&content);
+    let display = format_runtime_errors_display(&entries);
+    println!("\n{DIM}{display}{RESET}\n");
+}
