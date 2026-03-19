@@ -98,6 +98,24 @@ fn tool_result_preview(result: &ToolResult, max_chars: usize) -> String {
     truncate_with_ellipsis(first_line, max_chars)
 }
 
+/// Check if a tool result contains useful content beyond just an error marker.
+/// Returns true if the result has non-trivial text content (>20 chars), indicating
+/// a partial success — the tool failed but still produced useful output.
+pub fn has_useful_content(result: &ToolResult) -> bool {
+    let text: String = result
+        .content
+        .iter()
+        .filter_map(|c| match c {
+            Content::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let text = text.trim();
+    // More than 20 chars suggests real content, not just "error" or "failed"
+    text.len() > 20
+}
+
 /// Write response text to a file if --output was specified.
 pub fn write_output_file(path: &Option<String>, text: &str) {
     if let Some(path) = path {
@@ -327,7 +345,13 @@ async fn run_prompt_once(agent: &mut Agent, input: &str) -> PromptResult {
                             .map(|d| format!(" {DIM}({d}){RESET}"))
                             .unwrap_or_default();
                         if is_error {
-                            println!(" {RED}✗{RESET}{dur_str}");
+                            // Check for partial success — tool errored but has content
+                            let has_content = has_useful_content(&result);
+                            if has_content {
+                                println!(" {YELLOW}⚠{RESET}{dur_str} {DIM}(partial){RESET}");
+                            } else {
+                                println!(" {RED}✗{RESET}{dur_str}");
+                            }
                             let preview = tool_result_preview(&result, 200);
                             if !preview.is_empty() {
                                 println!("{DIM}    {preview}{RESET}");
@@ -850,5 +874,56 @@ mod tests {
         assert_eq!(results.len(), 1);
         // The preview should contain BOLD highlighting around "hello"
         assert!(results[0].2.contains(&format!("{BOLD}hello{RESET}")));
+    }
+
+    #[test]
+    fn test_has_useful_content_empty() {
+        let result = ToolResult {
+            content: vec![],
+            details: serde_json::json!(null),
+        };
+        assert!(!has_useful_content(&result));
+    }
+
+    #[test]
+    fn test_has_useful_content_short_error() {
+        let result = ToolResult {
+            content: vec![Content::Text {
+                text: "error".to_string(),
+            }],
+            details: serde_json::json!(null),
+        };
+        assert!(!has_useful_content(&result));
+    }
+
+    #[test]
+    fn test_has_useful_content_with_real_content() {
+        let result = ToolResult {
+            content: vec![Content::Text {
+                text: "Exit code: 1\nSTDOUT:\ntest_foo ... ok\ntest_bar ... FAILED\nSTDERR:\nerror[E0308]: mismatched types".to_string(),
+            }],
+            details: serde_json::json!(null),
+        };
+        assert!(has_useful_content(&result));
+    }
+
+    #[test]
+    fn test_has_useful_content_threshold() {
+        // Exactly at threshold (20 chars)
+        let result = ToolResult {
+            content: vec![Content::Text {
+                text: "12345678901234567890".to_string(),
+            }],
+            details: serde_json::json!(null),
+        };
+        assert!(!has_useful_content(&result)); // not >20, it's ==20
+
+        let result2 = ToolResult {
+            content: vec![Content::Text {
+                text: "123456789012345678901".to_string(), // 21 chars
+            }],
+            details: serde_json::json!(null),
+        };
+        assert!(has_useful_content(&result2));
     }
 }
