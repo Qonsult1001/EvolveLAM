@@ -107,6 +107,7 @@ Additional skills (mutable, created by the agent or contributors):
 - `SESSION_PLAN.md` — ephemeral, written by Phase A planning agent (gitignored)
 - `ISSUES_TODAY.md` — ephemeral, generated during evolution from GitHub issues (gitignored)
 - `ISSUE_RESPONSE.md` — ephemeral, agent writes this to respond to issues (gitignored)
+- `CLAUDE_CODE_GAP.md` — gap analysis comparing yoyo to Claude Code (updated during `finish` phase)
 
 ## Safety Rules
 

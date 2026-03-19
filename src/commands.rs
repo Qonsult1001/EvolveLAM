@@ -64,6 +64,7 @@ pub const KNOWN_COMMANDS: &[&str] = &[
     "/ast",
     "/coupling",
     "/errors",
+    "/stats",
 ];
 
 /// Well-known model names for `/model <Tab>` completion.
@@ -543,7 +544,7 @@ pub use crate::commands_project::{
 // Session-related handlers
 pub use crate::commands_session::{
     auto_compact_if_needed, auto_save_on_exit, handle_compact, handle_history, handle_jump,
-    handle_load, handle_mark, handle_marks, handle_save, handle_search, handle_spawn,
+    handle_load, handle_mark, handle_marks, handle_save, handle_search, handle_spawn, handle_stats,
     last_session_exists, load_bookmarks,
 };
 

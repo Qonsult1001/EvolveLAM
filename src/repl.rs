@@ -425,6 +425,10 @@ pub async fn run_repl(
                 commands::handle_errors();
                 continue;
             }
+            "/stats" => {
+                commands::handle_stats();
+                continue;
+            }
             "/test" => {
                 commands::handle_test();
                 continue;

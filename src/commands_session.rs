@@ -1,5 +1,5 @@
 //! Session-related command handlers: /save, /load, /compact, /history, /search,
-//! /mark, /jump, /marks, /spawn.
+//! /mark, /jump, /marks, /spawn, /stats.
 
 use crate::format::*;
 use crate::prompt::*;
@@ -400,6 +400,140 @@ pub async fn handle_spawn(
     Some(context_msg)
 }
 
+// ── /stats ──────────────────────────────────────────────────────────────
+
+/// Parse JOURNAL.md to extract session stats: number of sessions per day, task counts.
+pub fn parse_journal_stats(content: &str) -> JournalStats {
+    let mut stats = JournalStats {
+        total_sessions: 0,
+        sessions_by_day: Vec::new(),
+        total_tests_mentioned: 0,
+    };
+
+    let mut current_day: Option<u32> = None;
+    let mut day_sessions: u32 = 0;
+
+    for line in content.lines() {
+        // Match "## Day N" headers
+        if let Some(rest) = line.strip_prefix("## Day ") {
+            if let Some(day_num) = rest
+                .split(|c: char| !c.is_ascii_digit())
+                .next()
+                .and_then(|s| s.parse::<u32>().ok())
+            {
+                if let Some(prev_day) = current_day {
+                    if prev_day != day_num && day_sessions > 0 {
+                        stats.sessions_by_day.push((prev_day, day_sessions));
+                        day_sessions = 0;
+                    }
+                }
+                current_day = Some(day_num);
+                stats.total_sessions += 1;
+                day_sessions += 1;
+            }
+        }
+        // Count test mentions like "N unit tests" or "N tests"
+        if let Some(idx) = line.find(" unit test") {
+            let before = &line[..idx];
+            // Extract the last number before " unit test"
+            let num_str: String = before
+                .chars()
+                .rev()
+                .take_while(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .chars()
+                .rev()
+                .collect();
+            if let Ok(num) = num_str.parse::<u32>() {
+                stats.total_tests_mentioned = stats.total_tests_mentioned.max(num);
+            }
+        }
+    }
+    // Push the last day
+    if let Some(day) = current_day {
+        if day_sessions > 0 {
+            stats.sessions_by_day.push((day, day_sessions));
+        }
+    }
+
+    stats
+}
+
+/// Stats extracted from JOURNAL.md.
+#[derive(Debug, Clone, PartialEq)]
+pub struct JournalStats {
+    pub total_sessions: u32,
+    pub sessions_by_day: Vec<(u32, u32)>,
+    pub total_tests_mentioned: u32,
+}
+
+/// Format the /stats display output.
+pub fn format_stats_display(journal_stats: &JournalStats, error_content: &str) -> String {
+    let mut out = String::new();
+
+    out.push_str("  Session Statistics:\n");
+    out.push_str(&format!(
+        "    Total sessions: {}\n",
+        journal_stats.total_sessions
+    ));
+
+    if !journal_stats.sessions_by_day.is_empty() {
+        let total_days = journal_stats.sessions_by_day.len();
+        let avg = journal_stats.total_sessions as f64 / total_days as f64;
+        out.push_str(&format!("    Days active: {}\n", total_days));
+        out.push_str(&format!("    Avg sessions/day: {:.1}\n", avg));
+
+        // Most productive day
+        if let Some((day, count)) = journal_stats.sessions_by_day.iter().max_by_key(|(_, c)| c) {
+            out.push_str(&format!(
+                "    Most productive: Day {} ({} sessions)\n",
+                day, count
+            ));
+        }
+    }
+
+    if journal_stats.total_tests_mentioned > 0 {
+        out.push_str(&format!(
+            "    Peak test count: {}\n",
+            journal_stats.total_tests_mentioned
+        ));
+    }
+
+    // Error stats
+    let error_entries = crate::commands_project::parse_error_log(error_content);
+    if !error_entries.is_empty() {
+        let totals = crate::commands_project::summarize_error_log(&error_entries);
+        let grand_total: usize = totals.iter().map(|(_, c)| c).sum();
+        let resolved_count = error_entries
+            .iter()
+            .filter(|e| e.resolved == Some(true))
+            .count();
+        out.push_str(&format!(
+            "\n  Error Recovery:\n    Total errors logged: {}\n    Fix events: {}\n    Resolved: {}\n",
+            grand_total,
+            error_entries.len(),
+            resolved_count
+        ));
+        if let Some((top_cat, top_count)) = totals.first() {
+            out.push_str(&format!(
+                "    Most common error: {} ({})\n",
+                top_cat, top_count
+            ));
+        }
+    }
+
+    out
+}
+
+/// Handle the /stats command.
+pub fn handle_stats() {
+    let journal = std::fs::read_to_string("JOURNAL.md").unwrap_or_default();
+    let journal_stats = parse_journal_stats(&journal);
+    let error_content = std::fs::read_to_string(".yoyo/error_log.jsonl").unwrap_or_default();
+    let display = format_stats_display(&journal_stats, &error_content);
+    println!("{DIM}{display}{RESET}\n");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -511,5 +645,56 @@ mod tests {
 
         std::env::set_current_dir(&original_dir).unwrap();
         let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_parse_journal_stats_counts_sessions() {
+        let journal = "# Journal\n\n## Day 19 — 07:21 — title\nSome text\n\n## Day 19 — 07:00 — title2\nMore text\n\n## Day 18 — 23:36 — title3\nText\n";
+        let stats = parse_journal_stats(journal);
+        assert_eq!(stats.total_sessions, 3);
+        assert_eq!(stats.sessions_by_day.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_journal_stats_finds_test_count() {
+        let journal = "## Day 19 — 07:21 — title\n716 unit tests + 67 integration tests.\n";
+        let stats = parse_journal_stats(journal);
+        assert_eq!(stats.total_tests_mentioned, 716);
+    }
+
+    #[test]
+    fn test_parse_journal_stats_empty() {
+        let stats = parse_journal_stats("");
+        assert_eq!(stats.total_sessions, 0);
+        assert!(stats.sessions_by_day.is_empty());
+    }
+
+    #[test]
+    fn test_format_stats_display_basic() {
+        let stats = JournalStats {
+            total_sessions: 5,
+            sessions_by_day: vec![(18, 2), (19, 3)],
+            total_tests_mentioned: 700,
+        };
+        let display = format_stats_display(&stats, "");
+        assert!(display.contains("Total sessions: 5"));
+        assert!(display.contains("Days active: 2"));
+        assert!(display.contains("Avg sessions/day: 2.5"));
+        assert!(display.contains("Most productive: Day 19 (3 sessions)"));
+        assert!(display.contains("Peak test count: 700"));
+    }
+
+    #[test]
+    fn test_format_stats_display_with_errors() {
+        let stats = JournalStats {
+            total_sessions: 1,
+            sessions_by_day: vec![(19, 1)],
+            total_tests_mentioned: 0,
+        };
+        let error_content = r#"{"ts":"2026-03-19T06:30:00Z","day":19,"categories":{"missing_import":3},"source":"fix","resolved":"true"}"#;
+        let display = format_stats_display(&stats, error_content);
+        assert!(display.contains("Error Recovery"));
+        assert!(display.contains("Total errors logged: 3"));
+        assert!(display.contains("Resolved: 1"));
     }
 }

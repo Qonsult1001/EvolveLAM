@@ -305,6 +305,20 @@ print(chr(10).join(results))
     fi
     echo ""
 
+    # Step 5b: Load gap analysis
+    GAP_ANALYSIS=""
+    if [ -f CLAUDE_CODE_GAP.md ]; then
+        # Extract the Priority Queue and any ❌/🟡 rows (the actionable parts)
+        GAP_MISSING=$(grep -E '^\|.*[❌🟡]' CLAUDE_CODE_GAP.md || true)
+        GAP_PRIORITY=$(sed -n '/^## Priority Queue/,/^## /p' CLAUDE_CODE_GAP.md | head -20 || true)
+        if [ -n "$GAP_MISSING" ] || [ -n "$GAP_PRIORITY" ]; then
+            GAP_ANALYSIS="Features you're missing or partial vs Claude Code:
+${GAP_MISSING}
+
+${GAP_PRIORITY}"
+        fi
+    fi
+
     # Save metadata for subsequent phases
     save_metadata
 
@@ -341,6 +355,12 @@ ${RESEARCH_BACKLOG:+
 These are research topics from RESEARCH.md. Study URLs, apply insights to improve yourself.
 When you complete a research item, mark it [x] in RESEARCH.md during implementation.
 $RESEARCH_BACKLOG
+}
+${GAP_ANALYSIS:+
+=== GAP ANALYSIS (vs Claude Code) ===
+These are features where you lag behind Claude Code. Closing ❌ gaps is high-impact work.
+Read CLAUDE_CODE_GAP.md for full context. Prioritize ❌ over 🟡.
+$GAP_ANALYSIS
 }
 Self-assess. Read your source. Test yourself. Note friction/bugs/gaps.
 Review ISSUES_TODAY.md — titles contain the actual request. Higher net score = higher priority. Sponsor 💖 = extra priority.
@@ -779,6 +799,31 @@ REOF
         echo "  Reflection prompt written to $EVOLVE_DIR/reflect_prompt.md"
     fi
 
+    # Step 6b3: Gap analysis update prompt
+    if [ -f CLAUDE_CODE_GAP.md ]; then
+        cat > "$EVOLVE_DIR/gap_prompt.md" <<GEOF
+You are yoyo. Day $DAY ($DATE $SESSION_TIME).
+
+Commits this session: $COMMITS_FOR_REFLECTION
+
+Read CLAUDE_CODE_GAP.md (the gap analysis comparing you to Claude Code).
+Based on what you built this session, update it:
+
+1. If a feature moved from ❌/🟡 to ✅ or 🟡, update its status and Notes column
+2. Move newly completed items to the "Recently completed" list (prepend, keep last 10)
+3. Update the "Stats" section at the bottom (line counts, test counts, command counts, etc.)
+4. Update the "Priority Queue" if the top priorities have changed
+5. Update "Last updated: Day N" at the top to "Last updated: Day $DAY ($DATE)"
+6. If you added an entirely new capability not in the table, add a row
+
+Do NOT invent features you didn't build. Only update based on actual commits.
+Keep the existing table format and structure.
+
+Commit: git add CLAUDE_CODE_GAP.md && git commit -m "Day $DAY ($SESSION_TIME): update gap analysis"
+GEOF
+        echo "  Gap analysis prompt written to $EVOLVE_DIR/gap_prompt.md"
+    fi
+
     # Step 6c/6d: Issue response validation
     ISSUES_FILE="ISSUES_TODAY.md"
     # Always produce a single integer (avoid "0\n0" on some shells)
@@ -971,6 +1016,7 @@ Read and understand your current state. Read these files NOW:
 - JOURNAL.md (last 5 entries — what you did recently)
 - ISSUES_TODAY.md (community issues fetched during setup)
 - RESEARCH.md (research backlog — topics to study and apply)
+- CLAUDE_CODE_GAP.md (gap analysis vs Claude Code — what you're missing)
 - memory/active_learnings.md if it exists (your accumulated wisdom)
 - skills/plan/SKILL.md (planning framework — use its prioritization)
 
@@ -1035,7 +1081,13 @@ If .evolve/reflect_prompt.md exists, read it. If genuinely novel insight
 (not code patterns — about yourself, your process, your growth), append one
 JSONL line to memory/learnings.jsonl via python3 json.dumps(). Otherwise skip.
 
---- STEP 7: DONE ---
+--- STEP 7: UPDATE GAP ANALYSIS ---
+
+If .evolve/gap_prompt.md exists, read it and update CLAUDE_CODE_GAP.md based
+on what you built this session. Only update features you actually implemented.
+Commit: git add CLAUDE_CODE_GAP.md && git commit -m "Day N (HH:MM): update gap analysis"
+
+--- STEP 8: DONE ---
 
 Report what was accomplished:
 - How many tasks completed vs reverted
