@@ -90,7 +90,7 @@ Uses `yoagent::Agent` with `AnthropicProvider`, `default_tools()`, and an option
 **Research backlog** (`RESEARCH.md`): Dual-write research backlog — humans add topics, and yoyo appends new items during reflection when it discovers knowledge gaps. Loaded during planning alongside GitHub issues. Format: `### [ ] Topic` entries with optional `URLs:` and `Goal:` fields, written in first person (yoyo's voice). Items marked `[x]` when addressed, never deleted. This is how yoyo's learning loop stays self-expanding — each session's struggles become the next session's curriculum.
 
 **State files** (read/written by the agent during evolution):
-- `IDENTITY.md` — the agent's constitution and rules (DO NOT MODIFY)
+- `IDENTITY.md` — the agent's identity and convergence philosophy
 - `PERSONALITY.md` — voice and values (DO NOT MODIFY)
 - `JOURNAL.md` — chronological log of evolution sessions (append at top, never delete)
 - `DAY_COUNT` — integer tracking current evolution day
@@ -102,7 +102,7 @@ Uses `yoagent::Agent` with `AnthropicProvider`, `default_tools()`, and an option
 ## Safety Rules
 
 These are enforced by the `evolve` skill and `evolve.sh`:
-- Never modify `IDENTITY.md`, `PERSONALITY.md`, `scripts/evolve.sh`, `scripts/format_issues.py`, `scripts/build_site.py`, or `.github/workflows/`
+- Never modify `PERSONALITY.md`, `scripts/evolve.sh`, `scripts/format_issues.py`, `scripts/build_site.py`, or `.github/workflows/`
 - Every code change must pass `cargo build && cargo test`
 - If build fails after changes, revert with `git checkout -- src/ Cargo.toml Cargo.lock`
 - Never delete existing tests

@@ -552,7 +552,7 @@ TEOF
     # Check 1: Protected files (committed + staged + unstaged)
     PROTECTED_CHANGES=""
     if ! PROTECTED_CHANGES=$(git diff --name-only "$PRE_TASK_SHA"..HEAD -- \
-        .github/workflows/ IDENTITY.md PERSONALITY.md \
+        .github/workflows/ PERSONALITY.md \
         scripts/evolve.sh scripts/format_issues.py scripts/build_site.py \
         skills/self-assess/ skills/evolve/ skills/communicate/ skills/research/ 2>&1); then
         echo "    BLOCKED: Task $TASK_NUM — git diff failed (cannot verify protected files)"
@@ -563,7 +563,7 @@ TEOF
     # Check staged (indexed) changes
     if [ "$TASK_OK" = true ]; then
         if ! PROTECTED_STAGED=$(git diff --cached --name-only -- \
-            .github/workflows/ IDENTITY.md PERSONALITY.md \
+            .github/workflows/ PERSONALITY.md \
             scripts/evolve.sh scripts/format_issues.py scripts/build_site.py \
             skills/self-assess/ skills/evolve/ skills/communicate/ skills/research/ 2>&1); then
             echo "    BLOCKED: Task $TASK_NUM — git diff --cached failed"
@@ -578,7 +578,7 @@ TEOF
     # Check unstaged working tree changes
     if [ "$TASK_OK" = true ]; then
         if ! PROTECTED_UNSTAGED=$(git diff --name-only -- \
-            .github/workflows/ IDENTITY.md PERSONALITY.md \
+            .github/workflows/ PERSONALITY.md \
             scripts/evolve.sh scripts/format_issues.py scripts/build_site.py \
             skills/self-assess/ skills/evolve/ skills/communicate/ skills/research/ 2>&1); then
             echo "    BLOCKED: Task $TASK_NUM — git diff (working tree) failed"
