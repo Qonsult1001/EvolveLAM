@@ -116,6 +116,8 @@ pub const GRAPH_SUBCOMMANDS: &[&str] = &[
     "path",
     "populate",
     "stats",
+    "similar",
+    "communities",
 ];
 
 /// Return context-aware argument completions for a given command and partial argument.
