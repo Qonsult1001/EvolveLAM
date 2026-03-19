@@ -20,7 +20,7 @@ This document tracks the feature gap between yoyo and Claude Code, used to infor
 | Multi-turn conversation | ✅ | ✅ | Both maintain conversation history |
 | Thinking/reasoning display | ✅ | ✅ | yoyo shows thinking dimmed |
 | Error recovery / auto-retry | ✅ | ✅ | yoagent retries 3x with exponential backoff by default |
-| Subagent / task spawning | 🟡 | ✅ | Basic `/spawn` runs tasks in separate context; Claude Code has richer orchestration |
+| Subagent / task spawning | ✅ | ✅ | `/spawn` with subcommands: `list` shows history, `result <id>` retrieves output, `<task>` runs in separate context; `SpawnHistory` tracks results (Day 19) |
 | Parallel tool execution | ✅ | ✅ | yoagent 0.6's default `ToolExecutionStrategy::Parallel` runs tools concurrently |
 | Tool output streaming | ✅ | ✅ | `StreamingBashTool` streams subprocess output line-by-line via `ToolContext.on_update` (Day 19); markdown streaming fixed (Day 17) |
 
@@ -86,7 +86,7 @@ This document tracks the feature gap between yoyo and Claude Code, used to infor
 | PR description generation | ✅ | ✅ | `/pr create [--draft]` generates AI-powered PR descriptions |
 | Commit message generation | ✅ | ✅ | `/commit` with heuristic-based message generation from staged diff (Day 8) |
 | Code review | ✅ | ✅ | `/review` provides AI-powered code review of staged/unstaged changes (Day 13) |
-| Multi-file refactoring | 🟡 | ✅ | yoyo can via tools; Claude Code is better at coordinating |
+| Multi-file refactoring | 🟡 | ✅ | yoyo can via tools + `/coupling` shows module and function-level dependencies; Claude Code is better at coordinating |
 
 ## Configuration
 
@@ -106,7 +106,7 @@ This document tracks the feature gap between yoyo and Claude Code, used to infor
 | API error display | ✅ | ✅ | Shows error messages |
 | Network retry | ✅ | ✅ | yoagent handles 3 retries with exponential backoff by default |
 | Rate limit handling | ✅ | ✅ | yoagent respects retry-after headers on 429s |
-| Graceful degradation | 🟡 | ✅ | yoyo has retry logic and error handling; not yet full fallback on partial failures |
+| Graceful degradation | ✅ | ✅ | Retry logic + `has_useful_content()` detects partial success in failed tool results; shows ⚠ (partial) instead of ✗ (Day 19) |
 | Ctrl+C handling | ✅ | ✅ | Both handle interrupts |
 
 ---
@@ -115,11 +115,15 @@ This document tracks the feature gap between yoyo and Claude Code, used to infor
 
 Based on this analysis, the highest-impact missing features are:
 
-1. **Richer subagent orchestration** — Better task decomposition and result aggregation for /spawn
-2. **Full graceful degradation** — Fallback behavior on partial tool failures
+1. **Multi-file refactoring coordination** — Better cross-file change orchestration
+2. **Deep file coupling integration** — Wire function-level refs into refactoring decisions
 
 Recently completed:
 
+- ✅ Subagent orchestration (Day 19) — `/spawn list`, `/spawn result <id>`, `SpawnHistory` tracking
+- ✅ Graceful degradation (Day 19) — `has_useful_content()` detects partial success, shows ⚠ (partial)
+- ✅ Multi-language error classification (Day 19) — Python, Node, Go classifiers with fix strategies
+- ✅ Function-level coupling (Day 19) — `detect_function_refs()` tracks cross-file symbol references
 - ✅ StreamingBashTool (Day 19) — real-time subprocess output streaming via `ToolContext.on_update`
 - ✅ Convergence metrics (Day 19) — `/stats` shows revert rate, test growth, activity trend, convergence verdict
 - ✅ Task confidence scoring (Day 19) — `/confidence` scores SESSION_PLAN.md tasks by familiarity
@@ -159,8 +163,8 @@ Recently completed:
 
 ## Stats
 
-- yoyo: ~23,200 lines of Rust across 15 source files + integration tests
-- 828 tests passing (761 unit + 67 integration)
+- yoyo: ~24,200 lines of Rust across 15 source files + integration tests
+- 861 tests passing (794 unit + 67 integration)
 - 41 REPL commands (including /spawn, /find, /docs, /fix, /lint, /pr, /review, /init, /mark, /jump, /marks, /index, /confidence, /stats, /graph, /errors, /hypotheses, /coupling, /ast)
 - 25 CLI flags (+ short aliases)
 - 10+ provider backends
@@ -180,3 +184,6 @@ Recently completed:
 - Convergence metrics (/stats)
 - Task confidence scoring (/confidence)
 - Latent space connection graph (/graph)
+- Multi-language error classification (Python, Node, Go)
+- Function-level file coupling (/coupling)
+- Graceful degradation on partial tool failures
