@@ -221,6 +221,387 @@ pub fn detect_project_name(dir: &std::path::Path) -> String {
 }
 
 /// Generate a complete YOYO.md context file by scanning the project.
+/// Extract the project description from README.md.
+/// Returns the first paragraph after the title (skipping badges, blank lines).
+pub fn extract_readme_description(dir: &std::path::Path) -> Option<String> {
+    let readme_names = ["README.md", "readme.md", "README", "README.rst"];
+    for name in &readme_names {
+        if let Ok(content) = std::fs::read_to_string(dir.join(name)) {
+            let mut lines = content.lines();
+            // Skip the title line
+            let mut found_title = false;
+            let mut description_lines = Vec::new();
+            for line in &mut lines {
+                let trimmed = line.trim();
+                if !found_title {
+                    if trimmed.starts_with("# ") || trimmed.starts_with("===") {
+                        found_title = true;
+                    }
+                    continue;
+                }
+                // Skip blank lines and badges (lines starting with [ or <)
+                if trimmed.is_empty() {
+                    if !description_lines.is_empty() {
+                        break; // End of first paragraph
+                    }
+                    continue;
+                }
+                if trimmed.starts_with('[') && trimmed.contains("](") {
+                    continue; // Skip badge lines
+                }
+                if trimmed.starts_with('<') {
+                    continue; // Skip HTML
+                }
+                if trimmed.starts_with('#') {
+                    break; // Next section
+                }
+                description_lines.push(trimmed.to_string());
+                if description_lines.len() >= 5 {
+                    break; // Enough
+                }
+            }
+            if !description_lines.is_empty() {
+                return Some(description_lines.join(" "));
+            }
+        }
+    }
+    None
+}
+
+/// Extract Rust dependencies from Cargo.toml [dependencies] section.
+pub fn extract_cargo_dependencies(dir: &std::path::Path) -> Vec<String> {
+    let content = match std::fs::read_to_string(dir.join("Cargo.toml")) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    let mut deps = Vec::new();
+    let mut in_deps = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed == "[dependencies]" {
+            in_deps = true;
+            continue;
+        }
+        if trimmed == "[dev-dependencies]" || trimmed == "[build-dependencies]" {
+            in_deps = false;
+            continue;
+        }
+        if trimmed.starts_with('[') {
+            in_deps = false;
+            continue;
+        }
+        if in_deps {
+            if let Some(name) = trimmed.split('=').next() {
+                let name = name.trim();
+                if !name.is_empty() && !name.starts_with('#') {
+                    deps.push(name.to_string());
+                }
+            }
+        }
+    }
+    deps
+}
+
+/// Extract Python dependencies from pyproject.toml or requirements.txt.
+pub fn extract_python_dependencies(dir: &std::path::Path) -> Vec<String> {
+    // Try pyproject.toml first
+    if let Ok(content) = std::fs::read_to_string(dir.join("pyproject.toml")) {
+        let mut deps = Vec::new();
+        let mut in_deps = false;
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("dependencies")
+                && (trimmed.contains('[') || trimmed.contains('='))
+            {
+                in_deps = true;
+                continue;
+            }
+            if in_deps {
+                if trimmed == "]" {
+                    break;
+                }
+                // Lines like: "requests>=2.0",
+                let dep = trimmed
+                    .trim_matches('"')
+                    .trim_matches('\'')
+                    .trim_end_matches(',');
+                // Extract just the package name (before any version specifier)
+                let name = dep
+                    .split(&['>', '<', '=', '!', '~', ';', '['][..])
+                    .next()
+                    .unwrap_or("")
+                    .trim();
+                if !name.is_empty() && !name.starts_with('#') {
+                    deps.push(name.to_string());
+                }
+            }
+        }
+        if !deps.is_empty() {
+            return deps;
+        }
+    }
+    // Fall back to requirements.txt
+    if let Ok(content) = std::fs::read_to_string(dir.join("requirements.txt")) {
+        return content
+            .lines()
+            .filter(|l| !l.trim().is_empty() && !l.trim().starts_with('#'))
+            .filter_map(|l| {
+                l.split(&['>', '<', '=', '!', '~', ';', '['][..])
+                    .next()
+                    .map(|s| s.trim().to_string())
+            })
+            .filter(|s| !s.is_empty())
+            .collect();
+    }
+    Vec::new()
+}
+
+/// Extract Node.js dependencies from package.json.
+pub fn extract_node_dependencies(dir: &std::path::Path) -> Vec<String> {
+    let content = match std::fs::read_to_string(dir.join("package.json")) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    // Try JSON parsing first (handles minified JSON)
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+        if let Some(deps_obj) = val.get("dependencies").and_then(|d| d.as_object()) {
+            return deps_obj.keys().cloned().collect();
+        }
+    }
+    // Fallback: line-by-line parsing
+    let mut deps = Vec::new();
+    let mut in_deps = false;
+    let mut in_dev_deps = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.contains("\"devDependencies\"") {
+            in_dev_deps = true;
+            in_deps = false;
+            continue;
+        }
+        if trimmed.contains("\"dependencies\"") && !in_dev_deps {
+            in_deps = true;
+            continue;
+        }
+        if (in_deps || in_dev_deps) && (trimmed == "}" || trimmed == "},") {
+            if in_dev_deps {
+                in_dev_deps = false;
+            } else {
+                in_deps = false;
+            }
+            continue;
+        }
+        if in_deps {
+            if let Some(name) = trimmed.split(':').next() {
+                let name = name.trim().trim_matches('"').trim_end_matches(',');
+                if !name.is_empty() {
+                    deps.push(name.to_string());
+                }
+            }
+        }
+    }
+    deps
+}
+
+/// Scan source files and extract a one-line summary for each.
+/// Returns (path, summary) pairs for the most important source files.
+pub fn scan_source_summaries(
+    dir: &std::path::Path,
+    project_type: &ProjectType,
+) -> Vec<(String, String)> {
+    let extensions: &[&str] = match project_type {
+        ProjectType::Rust => &["rs"],
+        ProjectType::Node => &["ts", "js", "tsx", "jsx"],
+        ProjectType::Python => &["py"],
+        ProjectType::Go => &["go"],
+        _ => &[],
+    };
+
+    if extensions.is_empty() {
+        return Vec::new();
+    }
+
+    let src_dirs = ["src", "lib", "app", "."];
+    let mut summaries = Vec::new();
+
+    for src_dir in &src_dirs {
+        let search_dir = if *src_dir == "." {
+            dir.to_path_buf()
+        } else {
+            dir.join(src_dir)
+        };
+        if !search_dir.is_dir() {
+            continue;
+        }
+
+        let entries = match std::fs::read_dir(&search_dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            if !extensions.contains(&ext) {
+                continue;
+            }
+
+            let rel_path = if *src_dir == "." {
+                path.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default()
+            } else {
+                format!(
+                    "{}/{}",
+                    src_dir,
+                    path.file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default()
+                )
+            };
+
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let summary = extract_file_purpose(&content, ext);
+                if !summary.is_empty() {
+                    summaries.push((rel_path, summary));
+                }
+            }
+        }
+
+        if !summaries.is_empty() && *src_dir != "." {
+            break; // Found source files in a named directory, don't scan root
+        }
+    }
+
+    summaries.sort_by(|a, b| a.0.cmp(&b.0));
+    summaries.truncate(20); // Cap at 20 files
+    summaries
+}
+
+/// Extract a one-line purpose description from a source file's content.
+fn extract_file_purpose(content: &str, ext: &str) -> String {
+    for line in content.lines().take(20) {
+        let trimmed = line.trim();
+        // Rust: //! doc comments
+        if ext == "rs" {
+            if let Some(doc) = trimmed.strip_prefix("//!") {
+                let doc = doc.trim();
+                if !doc.is_empty() && doc.len() > 5 {
+                    return truncate_str(doc, 100);
+                }
+            }
+        }
+        // Python: module docstrings
+        if ext == "py" && (trimmed.starts_with("\"\"\"") || trimmed.starts_with("'''")) {
+            let doc = trimmed
+                .trim_start_matches("\"\"\"")
+                .trim_start_matches("'''")
+                .trim_end_matches("\"\"\"")
+                .trim_end_matches("'''")
+                .trim();
+            if !doc.is_empty() && doc.len() > 5 {
+                return truncate_str(doc, 100);
+            }
+        }
+        // JS/TS: /** JSDoc comments */
+        if (ext == "js" || ext == "ts" || ext == "tsx" || ext == "jsx")
+            && trimmed.starts_with("/**")
+        {
+            let doc = trimmed
+                .trim_start_matches("/**")
+                .trim_end_matches("*/")
+                .trim_start_matches('*')
+                .trim();
+            if !doc.is_empty() && doc.len() > 5 {
+                return truncate_str(doc, 100);
+            }
+        }
+        // Go: // Package ... comments
+        if ext == "go" {
+            if let Some(doc) = trimmed.strip_prefix("// Package ") {
+                if !doc.is_empty() {
+                    return truncate_str(&format!("Package {doc}"), 100);
+                }
+            }
+        }
+        // Generic: single-line comments at the very top
+        if (trimmed.starts_with("//") || trimmed.starts_with('#'))
+            && !trimmed.starts_with("#!")
+            && !trimmed.starts_with("#[")
+        {
+            let doc = trimmed
+                .trim_start_matches("//")
+                .trim_start_matches('#')
+                .trim();
+            if doc.len() > 10 {
+                return truncate_str(doc, 100);
+            }
+        }
+    }
+    String::new()
+}
+
+/// Truncate a string to max_len characters, adding "…" if truncated.
+fn truncate_str(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}…", &s[..max_len - 1])
+    }
+}
+
+/// Check if a command is available on the system PATH.
+pub fn command_exists(cmd: &str) -> bool {
+    #[cfg(target_os = "windows")]
+    let check = std::process::Command::new("where")
+        .arg(cmd)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    #[cfg(not(target_os = "windows"))]
+    let check = std::process::Command::new("which")
+        .arg(cmd)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    check.is_ok_and(|s| s.success())
+}
+
+/// Detect the main entry point file for a project.
+pub fn detect_entry_point(dir: &std::path::Path, project_type: &ProjectType) -> Option<String> {
+    let candidates: &[&str] = match project_type {
+        ProjectType::Rust => &["src/main.rs", "src/lib.rs"],
+        ProjectType::Python => &[
+            "main.py",
+            "app.py",
+            "src/main.py",
+            "__main__.py",
+            "src/__main__.py",
+        ],
+        ProjectType::Node => &[
+            "src/index.ts",
+            "src/index.js",
+            "src/main.ts",
+            "src/main.js",
+            "index.ts",
+            "index.js",
+            "app.ts",
+            "app.js",
+        ],
+        ProjectType::Go => &["main.go", "cmd/main.go"],
+        _ => &[],
+    };
+    for c in candidates {
+        if dir.join(c).exists() {
+            return Some(c.to_string());
+        }
+    }
+    None
+}
+
 pub fn generate_init_content(dir: &std::path::Path) -> String {
     let project_type = detect_project_type(dir);
     let project_name = detect_project_name(dir);
@@ -235,14 +616,24 @@ pub fn generate_init_content(dir: &std::path::Path) -> String {
     content.push_str("<!-- YOYO.md — generated by `yoyo /init`. Edit to customize. -->\n");
     content.push_str("<!-- Also works as CLAUDE.md for compatibility with other tools. -->\n\n");
 
-    // About section
+    // About section — extract real description from README
     content.push_str("## About This Project\n\n");
     content.push_str(&format!("**{project_name}**"));
     if project_type != ProjectType::Unknown {
         content.push_str(&format!(" — {project_type} project"));
     }
     content.push_str("\n\n");
-    content.push_str("<!-- Add a description of what this project does. -->\n\n");
+    if let Some(desc) = extract_readme_description(dir) {
+        content.push_str(&desc);
+        content.push_str("\n\n");
+    } else {
+        content.push_str("<!-- Add a description of what this project does. -->\n\n");
+    }
+
+    // Entry point
+    if let Some(entry) = detect_entry_point(dir, &project_type) {
+        content.push_str(&format!("Entry point: `{entry}`\n\n"));
+    }
 
     // Build & Test section
     content.push_str("## Build & Test\n\n");
@@ -254,6 +645,34 @@ pub fn generate_init_content(dir: &std::path::Path) -> String {
             content.push_str(&format!("{cmd:<50} # {label}\n"));
         }
         content.push_str("```\n\n");
+    }
+
+    // Dependencies section — extract from config files
+    let deps = match project_type {
+        ProjectType::Rust => extract_cargo_dependencies(dir),
+        ProjectType::Python => extract_python_dependencies(dir),
+        ProjectType::Node => extract_node_dependencies(dir),
+        _ => Vec::new(),
+    };
+    if !deps.is_empty() {
+        content.push_str("## Dependencies\n\n");
+        let dep_list = if deps.len() > 15 {
+            format!("{}, and {} more", deps[..15].join(", "), deps.len() - 15)
+        } else {
+            deps.join(", ")
+        };
+        content.push_str(&format!("{dep_list}\n\n"));
+    }
+
+    // Architecture section — source file summaries
+    let summaries = scan_source_summaries(dir, &project_type);
+    if !summaries.is_empty() {
+        content.push_str("## Architecture\n\n");
+        content.push_str("| File | Purpose |\n|------|--------|\n");
+        for (path, summary) in &summaries {
+            content.push_str(&format!("| `{path}` | {summary} |\n"));
+        }
+        content.push('\n');
     }
 
     // Coding Conventions section
@@ -422,8 +841,15 @@ pub fn health_checks_for_project(
             let mut checks: Vec<(&str, Vec<&str>)> = vec![];
             #[cfg(not(test))]
             checks.push(("test", vec!["python", "-m", "pytest"]));
-            checks.push(("lint", vec!["python", "-m", "flake8", "."]));
-            checks.push(("typecheck", vec!["python", "-m", "mypy", "."]));
+            // Prefer ruff (fast, modern) over flake8
+            if command_exists("ruff") {
+                checks.push(("lint", vec!["ruff", "check", "."]));
+            } else {
+                checks.push(("lint", vec!["python", "-m", "flake8", "."]));
+            }
+            if command_exists("mypy") {
+                checks.push(("typecheck", vec!["python", "-m", "mypy", "."]));
+            }
             checks
         }
         ProjectType::Go => {
@@ -1230,7 +1656,17 @@ pub fn test_command_for_project(
     match project_type {
         ProjectType::Rust => Some(("cargo test", vec!["cargo", "test"])),
         ProjectType::Node => Some(("npm test", vec!["npm", "test"])),
-        ProjectType::Python => Some(("python -m pytest", vec!["python", "-m", "pytest"])),
+        ProjectType::Python => {
+            // Prefer pytest if available, fall back to unittest
+            if command_exists("pytest") || command_exists("python") {
+                Some(("python -m pytest", vec!["python", "-m", "pytest"]))
+            } else {
+                Some((
+                    "python -m unittest discover",
+                    vec!["python", "-m", "unittest", "discover"],
+                ))
+            }
+        }
         ProjectType::Go => Some(("go test ./...", vec!["go", "test", "./..."])),
         ProjectType::Make => Some(("make test", vec!["make", "test"])),
         ProjectType::Unknown => None,
@@ -1245,9 +1681,12 @@ pub struct TestSummary {
     pub ignored: u32,
 }
 
-/// Parse cargo test output for "test result:" lines and return aggregated totals.
-/// Handles multiple result lines (e.g., unit tests + integration tests).
-/// Returns None if no test result lines are found.
+/// Parse test output for summary lines. Supports:
+/// - Rust cargo test: "test result: ok. N passed; N failed; N ignored; ..."
+/// - pytest: "N passed, N failed, N skipped" or "====== N passed in Xs ======"
+/// - Jest/Mocha: "Tests: N passed, N failed, N total"
+///
+/// Returns None if no recognizable summary is found.
 pub fn parse_test_summary(output: &str) -> Option<TestSummary> {
     let mut total = TestSummary {
         passed: 0,
@@ -1258,28 +1697,72 @@ pub fn parse_test_summary(output: &str) -> Option<TestSummary> {
 
     for line in output.lines() {
         let trimmed = line.trim();
-        // Match: "test result: ok. N passed; N failed; N ignored; ..."
-        // or:    "test result: FAILED. N passed; N failed; N ignored; ..."
-        if !trimmed.starts_with("test result:") {
-            continue;
-        }
-        found = true;
-        // Extract numbers by finding "N passed", "N failed", "N ignored"
-        for part in trimmed.split(';') {
-            let part = part.trim();
-            if part.ends_with("passed") {
-                if let Some(n) = extract_leading_number(part) {
-                    total.passed += n;
-                }
-            } else if part.ends_with("failed") {
-                if let Some(n) = extract_leading_number(part) {
-                    total.failed += n;
-                }
-            } else if part.ends_with("ignored") {
-                if let Some(n) = extract_leading_number(part) {
-                    total.ignored += n;
+
+        // Rust cargo test: "test result: ok. N passed; N failed; N ignored; ..."
+        if trimmed.starts_with("test result:") {
+            found = true;
+            for part in trimmed.split(';') {
+                let part = part.trim();
+                if part.ends_with("passed") {
+                    if let Some(n) = extract_leading_number(part) {
+                        total.passed += n;
+                    }
+                } else if part.ends_with("failed") {
+                    if let Some(n) = extract_leading_number(part) {
+                        total.failed += n;
+                    }
+                } else if part.ends_with("ignored") {
+                    if let Some(n) = extract_leading_number(part) {
+                        total.ignored += n;
+                    }
                 }
             }
+            continue;
+        }
+
+        // pytest: "= N passed, N failed, N skipped in Xs =" or "= N passed in Xs ="
+        if trimmed.starts_with('=') && trimmed.ends_with('=') && trimmed.contains(" passed") {
+            found = true;
+            // Split by comma or spaces and look for "N passed", "N failed", "N skipped"
+            for part in trimmed.split(',') {
+                let part = part.trim().trim_matches('=').trim();
+                if part.contains("passed") {
+                    if let Some(n) = extract_leading_number(part) {
+                        total.passed += n;
+                    }
+                } else if part.contains("failed") || part.contains("error") {
+                    if let Some(n) = extract_leading_number(part) {
+                        total.failed += n;
+                    }
+                } else if part.contains("skipped") || part.contains("deselected") {
+                    if let Some(n) = extract_leading_number(part) {
+                        total.ignored += n;
+                    }
+                }
+            }
+            continue;
+        }
+
+        // Jest: "Tests:  N failed, N passed, N total"
+        if trimmed.starts_with("Tests:") {
+            found = true;
+            for part in trimmed.split(',') {
+                let part = part.trim();
+                if part.contains("passed") {
+                    if let Some(n) = extract_leading_number(part) {
+                        total.passed += n;
+                    }
+                } else if part.contains("failed") {
+                    if let Some(n) = extract_leading_number(part) {
+                        total.failed += n;
+                    }
+                } else if part.contains("skipped") || part.contains("pending") {
+                    if let Some(n) = extract_leading_number(part) {
+                        total.ignored += n;
+                    }
+                }
+            }
+            continue;
         }
     }
 
@@ -1412,7 +1895,15 @@ pub fn lint_command_for_project(
             vec!["cargo", "clippy", "--all-targets", "--", "-D", "warnings"],
         )),
         ProjectType::Node => Some(("npx eslint .", vec!["npx", "eslint", "."])),
-        ProjectType::Python => Some(("ruff check .", vec!["ruff", "check", "."])),
+        ProjectType::Python => {
+            if command_exists("ruff") {
+                Some(("ruff check .", vec!["ruff", "check", "."]))
+            } else if command_exists("flake8") {
+                Some(("flake8 .", vec!["flake8", "."]))
+            } else {
+                Some(("python -m flake8 .", vec!["python", "-m", "flake8", "."]))
+            }
+        }
         ProjectType::Go => Some(("golangci-lint run", vec!["golangci-lint", "run"])),
         ProjectType::Make | ProjectType::Unknown => None,
     }
@@ -2647,9 +3138,67 @@ pub fn handle_hypotheses() {
 
 pub fn handle_coupling(input: &str) {
     let query = input.strip_prefix("/coupling").unwrap_or("").trim();
-    let src_dir = std::path::Path::new("src");
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let project_type = detect_project_type(&cwd);
+
+    // Find the source directory based on project type
+    let src_dir = match project_type {
+        ProjectType::Rust | ProjectType::Go => {
+            if cwd.join("src").is_dir() {
+                cwd.join("src")
+            } else {
+                cwd.clone()
+            }
+        }
+        ProjectType::Node => {
+            // Check common Node source directories
+            for dir in &["src", "lib", "app", "pages", "components"] {
+                if cwd.join(dir).is_dir() {
+                    return handle_coupling_for_dir(input, &cwd.join(dir), query);
+                }
+            }
+            cwd.clone()
+        }
+        ProjectType::Python => {
+            // Python: look for a package directory or src/
+            if cwd.join("src").is_dir() {
+                cwd.join("src")
+            } else {
+                // Look for first directory containing __init__.py
+                if let Ok(entries) = std::fs::read_dir(&cwd) {
+                    for entry in entries.flatten() {
+                        let p = entry.path();
+                        if p.is_dir()
+                            && p.join("__init__.py").exists()
+                            && p.file_name().is_some_and(|n| {
+                                !n.to_string_lossy().starts_with('.') && n != "tests" && n != "test"
+                            })
+                        {
+                            return handle_coupling_for_dir(input, &p, query);
+                        }
+                    }
+                }
+                cwd.clone()
+            }
+        }
+        _ => {
+            if cwd.join("src").is_dir() {
+                cwd.join("src")
+            } else {
+                println!("{DIM}  No source directory found. Tried: src/{RESET}\n");
+                return;
+            }
+        }
+    };
+    handle_coupling_for_dir(input, &src_dir, query);
+}
+
+fn handle_coupling_for_dir(_input: &str, src_dir: &std::path::Path, query: &str) {
     if !src_dir.is_dir() {
-        println!("{DIM}  No src/ directory found.{RESET}\n");
+        println!(
+            "{DIM}  Source directory not found: {}{RESET}\n",
+            src_dir.display()
+        );
         return;
     }
 
@@ -3117,5 +3666,324 @@ pub fn handle_runtime_errors(input: &str) {
         _ => {
             println!("{DIM}  usage: /runtime-errors [patterns|summary|clear]{RESET}\n");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_extract_file_purpose_rust_doc_comment() {
+        let content = "//! Agent core and REPL loop\nuse std::io;\nfn main() {}";
+        assert_eq!(
+            extract_file_purpose(content, "rs"),
+            "Agent core and REPL loop"
+        );
+    }
+
+    #[test]
+    fn test_extract_file_purpose_python_docstring() {
+        let content = "\"\"\"Authentication module for user login\"\"\"";
+        assert_eq!(
+            extract_file_purpose(content, "py"),
+            "Authentication module for user login"
+        );
+    }
+
+    #[test]
+    fn test_extract_file_purpose_js_jsdoc() {
+        let content = "/** Main application entry point and router */\nimport React from 'react';";
+        assert_eq!(
+            extract_file_purpose(content, "js"),
+            "Main application entry point and router"
+        );
+    }
+
+    #[test]
+    fn test_extract_file_purpose_go_package() {
+        let content = "// Package auth provides authentication middleware\npackage auth";
+        assert_eq!(
+            extract_file_purpose(content, "go"),
+            "Package auth provides authentication middleware"
+        );
+    }
+
+    #[test]
+    fn test_extract_file_purpose_empty_returns_empty() {
+        assert_eq!(extract_file_purpose("fn main() {}", "rs"), "");
+    }
+
+    #[test]
+    fn test_extract_file_purpose_short_comment_skipped() {
+        // "//! Hi" is only 2 chars after trim — below the len > 5 threshold
+        assert_eq!(extract_file_purpose("//! Hi", "rs"), "");
+    }
+
+    #[test]
+    fn test_truncate_str_short() {
+        assert_eq!(truncate_str("hello", 10), "hello");
+    }
+
+    #[test]
+    fn test_truncate_str_exact() {
+        assert_eq!(truncate_str("hello", 5), "hello");
+    }
+
+    #[test]
+    fn test_truncate_str_long() {
+        let result = truncate_str("hello world this is long", 10);
+        assert_eq!(result, "hello wor…");
+        assert!(result.chars().count() <= 10);
+    }
+
+    #[test]
+    fn test_extract_readme_description_basic() {
+        let dir = TempDir::new().unwrap();
+        fs::write(
+            dir.path().join("README.md"),
+            "# My Project\n\nThis is an awesome tool for building things.\n\n## Install\n",
+        )
+        .unwrap();
+        let desc = extract_readme_description(dir.path());
+        assert_eq!(
+            desc,
+            Some("This is an awesome tool for building things.".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_readme_description_skips_badges() {
+        let dir = TempDir::new().unwrap();
+        fs::write(
+            dir.path().join("README.md"),
+            "# Project\n[![Build](https://img.shields.io/badge)]\n\nActual description here.\n",
+        )
+        .unwrap();
+        let desc = extract_readme_description(dir.path());
+        assert_eq!(desc, Some("Actual description here.".to_string()));
+    }
+
+    #[test]
+    fn test_extract_readme_description_no_readme() {
+        let dir = TempDir::new().unwrap();
+        assert_eq!(extract_readme_description(dir.path()), None);
+    }
+
+    #[test]
+    fn test_extract_cargo_dependencies() {
+        let dir = TempDir::new().unwrap();
+        fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname = \"test\"\n\n[dependencies]\nserde = \"1.0\"\ntokio = { version = \"1\", features = [\"full\"] }\n\n[dev-dependencies]\ntempfile = \"3\"\n",
+        )
+        .unwrap();
+        let deps = extract_cargo_dependencies(dir.path());
+        assert!(deps.contains(&"serde".to_string()));
+        assert!(deps.contains(&"tokio".to_string()));
+        // dev-dependencies should not be included
+        assert!(!deps.contains(&"tempfile".to_string()));
+    }
+
+    #[test]
+    fn test_extract_node_dependencies() {
+        let dir = TempDir::new().unwrap();
+        fs::write(
+            dir.path().join("package.json"),
+            r#"{"dependencies":{"react":"^18","express":"^4"},"devDependencies":{"jest":"^29"}}"#,
+        )
+        .unwrap();
+        let deps = extract_node_dependencies(dir.path());
+        assert!(deps.contains(&"react".to_string()));
+        assert!(deps.contains(&"express".to_string()));
+        assert!(!deps.contains(&"jest".to_string()));
+    }
+
+    #[test]
+    fn test_detect_entry_point_rust() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(dir.path().join("src/main.rs"), "fn main() {}").unwrap();
+        assert_eq!(
+            detect_entry_point(dir.path(), &ProjectType::Rust),
+            Some("src/main.rs".to_string())
+        );
+    }
+
+    #[test]
+    fn test_detect_entry_point_python() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("main.py"), "print('hi')").unwrap();
+        assert_eq!(
+            detect_entry_point(dir.path(), &ProjectType::Python),
+            Some("main.py".to_string())
+        );
+    }
+
+    #[test]
+    fn test_detect_entry_point_not_found() {
+        let dir = TempDir::new().unwrap();
+        assert_eq!(detect_entry_point(dir.path(), &ProjectType::Rust), None);
+    }
+
+    #[test]
+    fn test_extract_python_dependencies_requirements_txt() {
+        let dir = TempDir::new().unwrap();
+        fs::write(
+            dir.path().join("requirements.txt"),
+            "flask==2.0\nrequests>=2.28\n# comment\nnumpy\n",
+        )
+        .unwrap();
+        let deps = extract_python_dependencies(dir.path());
+        assert!(deps.contains(&"flask".to_string()));
+        assert!(deps.contains(&"requests".to_string()));
+        assert!(deps.contains(&"numpy".to_string()));
+    }
+
+    // ── parse_test_summary multi-framework tests ──
+
+    #[test]
+    fn test_parse_test_summary_cargo() {
+        let output = "test result: ok. 42 passed; 1 failed; 3 ignored; 0 measured; 0 filtered out";
+        let summary = parse_test_summary(output).unwrap();
+        assert_eq!(summary.passed, 42);
+        assert_eq!(summary.failed, 1);
+        assert_eq!(summary.ignored, 3);
+    }
+
+    #[test]
+    fn test_parse_test_summary_pytest() {
+        let output = "============================== 15 passed, 2 failed, 1 skipped in 3.42s ==============================";
+        let summary = parse_test_summary(output).unwrap();
+        assert_eq!(summary.passed, 15);
+        assert_eq!(summary.failed, 2);
+        assert_eq!(summary.ignored, 1);
+    }
+
+    #[test]
+    fn test_parse_test_summary_pytest_all_passed() {
+        let output =
+            "============================== 8 passed in 0.53s ==============================";
+        let summary = parse_test_summary(output).unwrap();
+        assert_eq!(summary.passed, 8);
+        assert_eq!(summary.failed, 0);
+        assert_eq!(summary.ignored, 0);
+    }
+
+    #[test]
+    fn test_parse_test_summary_jest() {
+        let output = "Tests:  3 failed, 25 passed, 28 total";
+        let summary = parse_test_summary(output).unwrap();
+        assert_eq!(summary.passed, 25);
+        assert_eq!(summary.failed, 3);
+    }
+
+    #[test]
+    fn test_parse_test_summary_no_match() {
+        let output = "some random output\nnothing test-like here\n";
+        assert!(parse_test_summary(output).is_none());
+    }
+
+    #[test]
+    fn test_extract_readme_description_empty_readme() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("README.md"), "# Title\n\n").unwrap();
+        assert_eq!(extract_readme_description(dir.path()), None);
+    }
+
+    #[test]
+    fn test_scan_source_summaries_rust_project() {
+        let dir = TempDir::new().unwrap();
+        let src = dir.path().join("src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(
+            src.join("main.rs"),
+            "//! CLI entry point and REPL\nfn main() {}",
+        )
+        .unwrap();
+        fs::write(
+            src.join("lib.rs"),
+            "//! Core library for the agent\npub mod core;",
+        )
+        .unwrap();
+        let summaries = scan_source_summaries(dir.path(), &ProjectType::Rust);
+        assert_eq!(summaries.len(), 2);
+        // Should be sorted by path
+        assert_eq!(summaries[0].0, "src/lib.rs");
+        assert_eq!(summaries[1].0, "src/main.rs");
+        assert!(summaries[1].1.contains("CLI entry point"));
+    }
+
+    #[test]
+    fn test_scan_source_summaries_empty_src() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        let summaries = scan_source_summaries(dir.path(), &ProjectType::Rust);
+        assert!(summaries.is_empty());
+    }
+
+    #[test]
+    fn test_scan_source_summaries_unknown_project() {
+        let dir = TempDir::new().unwrap();
+        let summaries = scan_source_summaries(dir.path(), &ProjectType::Unknown);
+        assert!(summaries.is_empty());
+    }
+
+    #[test]
+    fn test_generate_init_content_empty_dir() {
+        let dir = TempDir::new().unwrap();
+        let content = generate_init_content(dir.path());
+        assert!(content.contains("# Project Context"));
+        assert!(content.contains("## About This Project"));
+        // Should have placeholder comment for description
+        assert!(content.contains("<!-- Add a description"));
+    }
+
+    #[test]
+    fn test_generate_init_content_rust_project() {
+        let dir = TempDir::new().unwrap();
+        fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname = \"myapp\"\nversion = \"0.1.0\"\n\n[dependencies]\nserde = \"1\"\n",
+        )
+        .unwrap();
+        let src = dir.path().join("src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("main.rs"), "//! Main application\nfn main() {}").unwrap();
+        fs::write(
+            dir.path().join("README.md"),
+            "# MyApp\n\nA fast CLI tool for data processing.\n",
+        )
+        .unwrap();
+        let content = generate_init_content(dir.path());
+        assert!(content.contains("**myapp**"));
+        assert!(content.contains("Rust (Cargo) project"));
+        assert!(content.contains("A fast CLI tool for data processing."));
+        assert!(content.contains("serde"));
+        assert!(content.contains("Entry point: `src/main.rs`"));
+        assert!(content.contains("src/main.rs"));
+    }
+
+    #[test]
+    fn test_detect_entry_point_node() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("index.js"), "console.log('hi')").unwrap();
+        assert_eq!(
+            detect_entry_point(dir.path(), &ProjectType::Node),
+            Some("index.js".to_string())
+        );
+    }
+
+    #[test]
+    fn test_command_exists_known() {
+        // "git" should exist on any dev machine
+        assert!(command_exists("git"));
+    }
+
+    #[test]
+    fn test_command_exists_unknown() {
+        assert!(!command_exists("definitely_not_a_real_command_xyz123"));
     }
 }
