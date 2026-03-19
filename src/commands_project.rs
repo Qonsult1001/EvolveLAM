@@ -2412,18 +2412,28 @@ pub fn handle_hypotheses() {
 
 // ── /coupling ───────────────────────────────────────────────────────────
 
-pub fn handle_coupling() {
+pub fn handle_coupling(input: &str) {
+    let query = input.strip_prefix("/coupling").unwrap_or("").trim();
     let src_dir = std::path::Path::new("src");
     if !src_dir.is_dir() {
         println!("{DIM}  No src/ directory found.{RESET}\n");
         return;
     }
-    let couplings = ast::detect_file_couplings(src_dir);
-    let formatted = ast::format_couplings(&couplings);
-    println!("{DIM}{formatted}{RESET}");
 
-    // Function-level cross-references
-    let func_refs = ast::detect_function_refs(src_dir);
-    let func_formatted = ast::format_function_refs(&func_refs);
-    println!("{DIM}{func_formatted}{RESET}\n");
+    if query.is_empty() {
+        // Full coupling report
+        let couplings = ast::detect_file_couplings(src_dir);
+        let formatted = ast::format_couplings(&couplings);
+        println!("{DIM}{formatted}{RESET}");
+
+        let func_refs = ast::detect_function_refs(src_dir);
+        let func_formatted = ast::format_function_refs(&func_refs);
+        println!("{DIM}{func_formatted}{RESET}\n");
+    } else {
+        // Symbol-specific query
+        let func_refs = ast::detect_function_refs(src_dir);
+        let filtered = ast::filter_function_refs_by_symbol(&func_refs, query);
+        let formatted = ast::format_filtered_refs(&filtered, query);
+        println!("{DIM}{formatted}{RESET}\n");
+    }
 }

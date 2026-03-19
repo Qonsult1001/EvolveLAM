@@ -552,8 +552,8 @@ pub async fn run_repl(
                 commands::handle_ast(input);
                 continue;
             }
-            "/coupling" => {
-                commands::handle_coupling();
+            s if s == "/coupling" || s.starts_with("/coupling ") => {
+                commands::handle_coupling(input);
                 continue;
             }
             "/retry" => {

@@ -719,6 +719,55 @@ fn is_word_boundary_match(line: &str, name: &str) -> bool {
     false
 }
 
+/// Filter function refs to only those matching a specific symbol name.
+pub fn filter_function_refs_by_symbol<'a>(
+    refs: &'a [FunctionRef],
+    symbol: &str,
+) -> Vec<&'a FunctionRef> {
+    let lower = symbol.to_lowercase();
+    refs.iter()
+        .filter(|r| r.symbol_name.to_lowercase().contains(&lower))
+        .collect()
+}
+
+/// Format filtered function refs for a specific symbol query.
+pub fn format_filtered_refs(refs: &[&FunctionRef], query: &str) -> String {
+    if refs.is_empty() {
+        return format!("  No cross-references found for \"{query}\".");
+    }
+
+    let mut lines = Vec::new();
+    lines.push(format!(
+        "  Cross-references for \"{query}\" ({} matches):\n",
+        refs.len()
+    ));
+
+    // Group by symbol name
+    let mut by_sym: std::collections::BTreeMap<&str, Vec<(&str, usize)>> =
+        std::collections::BTreeMap::new();
+    for r in refs {
+        by_sym
+            .entry(&r.symbol_name)
+            .or_default()
+            .push((&r.used_in, r.used_at_line));
+    }
+
+    for (sym, usages) in &by_sym {
+        // Find which file defines this symbol
+        let def_file = refs
+            .iter()
+            .find(|r| r.symbol_name == *sym)
+            .map(|r| r.defined_in.as_str())
+            .unwrap_or("?");
+        lines.push(format!("  {sym} (defined in {def_file}):"));
+        for (file, line) in usages {
+            lines.push(format!("    → {file}:{line}"));
+        }
+    }
+
+    lines.join("\n")
+}
+
 /// Format function-level cross-references for display.
 pub fn format_function_refs(refs: &[FunctionRef]) -> String {
     if refs.is_empty() {
@@ -1138,5 +1187,56 @@ use std::io;
         assert!(result.contains("commands.rs"));
         assert!(result.contains("repl.rs"));
         assert!(result.contains("Most-referenced"));
+    }
+
+    #[test]
+    fn test_filter_function_refs_by_symbol() {
+        let refs = vec![
+            FunctionRef {
+                defined_in: "ast.rs".to_string(),
+                symbol_name: "Symbol".to_string(),
+                used_in: "commands.rs".to_string(),
+                used_at_line: 10,
+            },
+            FunctionRef {
+                defined_in: "ast.rs".to_string(),
+                symbol_name: "SymbolKind".to_string(),
+                used_in: "commands.rs".to_string(),
+                used_at_line: 15,
+            },
+            FunctionRef {
+                defined_in: "memory.rs".to_string(),
+                symbol_name: "ConnectionGraph".to_string(),
+                used_in: "commands.rs".to_string(),
+                used_at_line: 20,
+            },
+        ];
+        let filtered = filter_function_refs_by_symbol(&refs, "Symbol");
+        assert_eq!(filtered.len(), 2); // Symbol and SymbolKind
+        let filtered_exact = filter_function_refs_by_symbol(&refs, "ConnectionGraph");
+        assert_eq!(filtered_exact.len(), 1);
+        let filtered_none = filter_function_refs_by_symbol(&refs, "nonexistent");
+        assert!(filtered_none.is_empty());
+    }
+
+    #[test]
+    fn test_format_filtered_refs_empty() {
+        let refs: Vec<&FunctionRef> = vec![];
+        let result = format_filtered_refs(&refs, "foo");
+        assert!(result.contains("No cross-references found"));
+    }
+
+    #[test]
+    fn test_format_filtered_refs_shows_definition_file() {
+        let r = FunctionRef {
+            defined_in: "memory.rs".to_string(),
+            symbol_name: "ConnectionGraph".to_string(),
+            used_in: "commands.rs".to_string(),
+            used_at_line: 42,
+        };
+        let refs = vec![&r];
+        let result = format_filtered_refs(&refs, "ConnectionGraph");
+        assert!(result.contains("defined in memory.rs"));
+        assert!(result.contains("commands.rs:42"));
     }
 }
