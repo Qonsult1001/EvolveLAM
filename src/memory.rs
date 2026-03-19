@@ -537,6 +537,41 @@ impl ConnectionGraph {
         }
     }
 
+    /// Compute mutual information between two concepts.
+    /// Uses pointwise mutual information: log2(P(a,b) / (P(a) * P(b))).
+    /// P(a) = degree(a) / total_edges, P(a,b) = shared_neighbors / total_edges.
+    /// Returns a value where positive means more related than expected by chance,
+    /// zero means independent, negative means less related than expected.
+    pub fn mutual_information(&self, a: &str, b: &str) -> f64 {
+        let total_edges = self.connection_count();
+        if total_edges == 0 {
+            return 0.0;
+        }
+
+        let neighbors_a: std::collections::HashSet<String> =
+            self.neighbors(a).into_iter().collect();
+        let neighbors_b: std::collections::HashSet<String> =
+            self.neighbors(b).into_iter().collect();
+
+        let deg_a = neighbors_a.len();
+        let deg_b = neighbors_b.len();
+        if deg_a == 0 || deg_b == 0 {
+            return 0.0;
+        }
+
+        let shared = neighbors_a.intersection(&neighbors_b).count();
+        if shared == 0 {
+            return 0.0; // No shared neighbors — independent
+        }
+
+        let total = total_edges as f64;
+        let p_a = deg_a as f64 / total;
+        let p_b = deg_b as f64 / total;
+        let p_ab = shared as f64 / total;
+
+        (p_ab / (p_a * p_b)).log2()
+    }
+
     /// Save the entire graph to the JSONL archive.
     #[allow(dead_code)] // Used by evolution scripts; not called from REPL binary path yet
     pub fn save(&self) -> Result<(), String> {
@@ -2031,6 +2066,44 @@ mod tests {
         let graph = ConnectionGraph::default();
         let path = graph.shortest_path("a", "b");
         assert_eq!(path, None);
+    }
+
+    // ── Mutual information tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_mutual_information_shared_neighbors() {
+        let mut graph = ConnectionGraph::default();
+        // a→c, b→c, a→d, b→d — a and b share neighbors c and d
+        graph.activate_connection("a", "c", ConnectionKind::Semantic);
+        graph.activate_connection("a", "d", ConnectionKind::Semantic);
+        graph.activate_connection("b", "c", ConnectionKind::Semantic);
+        graph.activate_connection("b", "d", ConnectionKind::Semantic);
+        let mi = graph.mutual_information("a", "b");
+        assert!(mi > 0.0, "Shared neighbors should produce positive MI");
+    }
+
+    #[test]
+    fn test_mutual_information_no_shared_neighbors() {
+        let mut graph = ConnectionGraph::default();
+        graph.activate_connection("a", "c", ConnectionKind::Semantic);
+        graph.activate_connection("b", "d", ConnectionKind::Semantic);
+        let mi = graph.mutual_information("a", "b");
+        assert_eq!(mi, 0.0, "No shared neighbors → MI = 0");
+    }
+
+    #[test]
+    fn test_mutual_information_empty_graph() {
+        let graph = ConnectionGraph::default();
+        let mi = graph.mutual_information("a", "b");
+        assert_eq!(mi, 0.0);
+    }
+
+    #[test]
+    fn test_mutual_information_unknown_concept() {
+        let mut graph = ConnectionGraph::default();
+        graph.activate_connection("a", "b", ConnectionKind::Semantic);
+        let mi = graph.mutual_information("a", "nonexistent");
+        assert_eq!(mi, 0.0);
     }
 
     // ── Concept extraction tests ────────────────────────────────────────

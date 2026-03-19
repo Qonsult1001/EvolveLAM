@@ -113,6 +113,8 @@ pub fn handle_graph(input: &str) {
         handle_graph_info();
     } else if let Some(args) = rest.strip_prefix("activate") {
         handle_graph_activate(args.trim());
+    } else if let Some(args) = rest.strip_prefix("similar") {
+        handle_graph_similar(args.trim());
     } else if let Some(args) = rest.strip_prefix("search") {
         handle_graph_search(args.trim());
     } else if let Some(args) = rest.strip_prefix("path") {
@@ -131,6 +133,7 @@ pub fn handle_graph(input: &str) {
 fn print_graph_help() {
     println!("{DIM}  usage: /graph downstream <concept>   Show causal downstream");
     println!("         /graph neighbors <concept>   Show all connections for a concept");
+    println!("         /graph similar <a> <b>       Compare two concepts (similarity + MI)");
     println!("         /graph info                  Show graph statistics");
     println!("         /graph activate <from> <to> <kind>  Activate a connection");
     println!("         /graph search <query>        Search concepts by substring");
@@ -433,6 +436,37 @@ fn handle_graph_communities() {
         }
         println!();
     }
+}
+
+fn handle_graph_similar(args: &str) {
+    let parts: Vec<&str> = args.splitn(2, ' ').collect();
+    if parts.len() < 2 || parts[0].is_empty() || parts[1].is_empty() {
+        println!("{DIM}  usage: /graph similar <concept_a> <concept_b>{RESET}\n");
+        return;
+    }
+    let a = parts[0].trim();
+    let b = parts[1].trim();
+    let graph = crate::memory::ConnectionGraph::load();
+
+    let jaccard = graph.concept_similarity(a, b);
+    let mi = graph.mutual_information(a, b);
+    let shared: Vec<String> = {
+        let na: std::collections::HashSet<String> = graph.neighbors(a).into_iter().collect();
+        let nb: std::collections::HashSet<String> = graph.neighbors(b).into_iter().collect();
+        na.intersection(&nb).cloned().collect()
+    };
+
+    println!("  Comparing \"{a}\" and \"{b}\":");
+    println!("    Jaccard similarity: {jaccard:.3}");
+    println!("    Mutual information: {mi:.3} bits");
+    if shared.is_empty() {
+        println!("    Shared neighbors:   (none)");
+    } else {
+        let mut sorted = shared;
+        sorted.sort();
+        println!("    Shared neighbors:   {}", sorted.join(", "));
+    }
+    println!();
 }
 
 fn handle_graph_search(query: &str) {
