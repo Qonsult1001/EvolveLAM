@@ -781,3 +781,124 @@ pub async fn handle_review(
         None => None,
     }
 }
+
+// ── /changelog ──────────────────────────────────────────────────────────
+
+/// Parse a git log line (from `--format="%ad|%s"`) into (date_str, subject).
+fn parse_changelog_line(line: &str) -> Option<(&str, &str)> {
+    let idx = line.find('|')?;
+    let date = line[..idx].trim();
+    let subject = line[idx + 1..].trim();
+    if date.is_empty() || subject.is_empty() {
+        return None;
+    }
+    Some((date, subject))
+}
+
+/// Format git log entries grouped by day as a changelog.
+pub fn format_changelog(log_output: &str) -> String {
+    let mut out = String::new();
+    let mut current_day = String::new();
+
+    for line in log_output.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Some((date, subject)) = parse_changelog_line(line) {
+            if date != current_day {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(&format!("  {BOLD}{date}{RESET}\n"));
+                current_day = date.to_string();
+            }
+            out.push_str(&format!("    • {subject}\n"));
+        }
+    }
+
+    if out.is_empty() {
+        format!("  {DIM}no commits in the specified range{RESET}\n")
+    } else {
+        out
+    }
+}
+
+pub fn handle_changelog(input: &str) {
+    let arg = input.strip_prefix("/changelog").unwrap_or("").trim();
+
+    let days: u32 = if arg.is_empty() {
+        7
+    } else {
+        match arg.parse() {
+            Ok(n) if n > 0 => n,
+            _ => {
+                println!("{RED}  usage: /changelog [days]  (default: 7){RESET}\n");
+                return;
+            }
+        }
+    };
+
+    let since = format!("{days} days ago");
+    let output = std::process::Command::new("git")
+        .args([
+            "log",
+            "--format=%ad|%s",
+            "--date=short",
+            &format!("--since={since}"),
+            "--reverse",
+        ])
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => {
+            let log = String::from_utf8_lossy(&o.stdout);
+            println!("\n  {BOLD}Changelog (last {days} days){RESET}\n");
+            print!("{}", format_changelog(&log));
+            println!();
+        }
+        Ok(o) => {
+            let err = String::from_utf8_lossy(&o.stderr);
+            println!("{RED}  git log failed: {err}{RESET}\n");
+        }
+        Err(e) => {
+            println!("{RED}  error: {e}{RESET}\n");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_changelog_line() {
+        assert_eq!(
+            parse_changelog_line("2026-03-19|fix build errors"),
+            Some(("2026-03-19", "fix build errors"))
+        );
+        assert_eq!(parse_changelog_line(""), None);
+        assert_eq!(parse_changelog_line("no pipe here"), None);
+        assert_eq!(parse_changelog_line("|empty date"), None);
+    }
+
+    #[test]
+    fn test_format_changelog_groups_by_day() {
+        let log = "2026-03-19|commit A\n2026-03-19|commit B\n2026-03-18|commit C\n";
+        let result = format_changelog(log);
+        assert!(result.contains("2026-03-19"));
+        assert!(result.contains("2026-03-18"));
+        assert!(result.contains("• commit A"));
+        assert!(result.contains("• commit B"));
+        assert!(result.contains("• commit C"));
+        // The date "2026-03-19" should appear only once
+        let count = result.matches("2026-03-19").count();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_format_changelog_empty() {
+        let result = format_changelog("");
+        assert!(result.contains("no commits"));
+    }
+}

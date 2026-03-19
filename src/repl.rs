@@ -446,6 +446,10 @@ pub async fn run_repl(
                 commands::handle_timing();
                 continue;
             }
+            s if s == "/changelog" || s.starts_with("/changelog ") => {
+                commands::handle_changelog(input);
+                continue;
+            }
             "/test" => {
                 commands::handle_test();
                 continue;

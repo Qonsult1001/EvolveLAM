@@ -66,6 +66,8 @@ pub const KNOWN_COMMANDS: &[&str] = &[
     "/confidence",
     "/hypotheses",
     "/timing",
+    "/changelog",
+    "/blame",
 ];
 
 /// Well-known model names for `/model <Tab>` completion.
@@ -251,6 +253,8 @@ pub fn help_text() -> String {
     out.push_str("  /coupling          Show file coupling map (use crate:: imports)\n");
     out.push_str("  /gap               Show gap analysis stats and update CLAUDE_CODE_GAP.md\n");
     out.push_str("  /timing            Show session duration history\n");
+    out.push_str("  /changelog [N]     Git changelog grouped by day (default: 7 days)\n");
+    out.push_str("  /blame <file> [L]  Git blame for a file (optionally centered on line L)\n");
     out.push('\n');
 
     // ── AI ──
