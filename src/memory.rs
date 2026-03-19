@@ -695,6 +695,359 @@ impl ConnectionGraph {
     }
 }
 
+// ============================================================================
+// Learning Ingestion — Populate graph from learnings.jsonl
+// ============================================================================
+
+/// A learning entry from `memory/learnings.jsonl`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LearningEntry {
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub takeaway: String,
+    #[serde(default)]
+    pub context: String,
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub day: Option<u32>,
+    #[serde(default)]
+    pub ts: String,
+    #[serde(rename = "type", default)]
+    pub entry_type: String,
+}
+
+/// Default path to the learnings archive.
+const LEARNINGS_FILE: &str = "memory/learnings.jsonl";
+
+/// Stop words to filter out during concept extraction.
+const STOP_WORDS: &[&str] = &[
+    "a",
+    "an",
+    "the",
+    "and",
+    "or",
+    "but",
+    "in",
+    "on",
+    "at",
+    "to",
+    "for",
+    "of",
+    "with",
+    "by",
+    "from",
+    "is",
+    "it",
+    "its",
+    "that",
+    "this",
+    "was",
+    "are",
+    "be",
+    "been",
+    "being",
+    "have",
+    "has",
+    "had",
+    "do",
+    "does",
+    "did",
+    "will",
+    "would",
+    "could",
+    "should",
+    "may",
+    "might",
+    "can",
+    "not",
+    "no",
+    "nor",
+    "so",
+    "if",
+    "then",
+    "than",
+    "too",
+    "very",
+    "just",
+    "about",
+    "also",
+    "more",
+    "most",
+    "much",
+    "many",
+    "some",
+    "any",
+    "each",
+    "every",
+    "all",
+    "both",
+    "few",
+    "other",
+    "own",
+    "same",
+    "such",
+    "only",
+    "even",
+    "still",
+    "into",
+    "over",
+    "after",
+    "before",
+    "between",
+    "through",
+    "during",
+    "up",
+    "out",
+    "down",
+    "off",
+    "when",
+    "where",
+    "how",
+    "what",
+    "which",
+    "who",
+    "whom",
+    "why",
+    "my",
+    "your",
+    "his",
+    "her",
+    "our",
+    "their",
+    "you",
+    "i",
+    "we",
+    "they",
+    "me",
+    "him",
+    "us",
+    "them",
+    "itself",
+    "myself",
+    "yourself",
+    "don",
+    "doesn",
+    "didn",
+    "won",
+    "wouldn",
+    "couldn",
+    "shouldn",
+    "isn",
+    "aren",
+    "wasn",
+    "weren",
+    "because",
+    "while",
+    "until",
+    "although",
+    "though",
+    "whether",
+    "instead",
+    "already",
+    "actually",
+    "rather",
+    "without",
+    "something",
+    "anything",
+    "everything",
+    "nothing",
+    "things",
+    "thing",
+    "way",
+    "ways",
+    "time",
+    "times",
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "first",
+    "second",
+    "last",
+    "next",
+    "new",
+    "old",
+    "good",
+    "better",
+    "best",
+    "real",
+    "really",
+    "right",
+    "back",
+    "going",
+    "went",
+    "done",
+    "made",
+    "make",
+    "got",
+    "get",
+    "say",
+    "said",
+    "like",
+    "just",
+];
+
+/// Extract concept keywords from a text string.
+///
+/// Splits on non-alphanumeric boundaries, lowercases, filters stop words,
+/// discards short tokens (<3 chars) and pure numbers, then deduplicates.
+pub fn extract_concepts(text: &str) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut concepts = Vec::new();
+
+    for word in text.split(|c: char| !c.is_alphanumeric() && c != '_') {
+        let w = word.to_lowercase();
+        if w.len() < 3 {
+            continue;
+        }
+        if w.chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+        if STOP_WORDS.contains(&w.as_str()) {
+            continue;
+        }
+        let normalized = w.replace(' ', "_");
+        if seen.insert(normalized.clone()) {
+            concepts.push(normalized);
+        }
+    }
+    concepts
+}
+
+/// Load learnings from the JSONL file.
+pub fn load_learnings() -> Vec<LearningEntry> {
+    load_learnings_from(Path::new(LEARNINGS_FILE))
+}
+
+/// Load learnings from a specific path (for testing).
+pub fn load_learnings_from(path: &Path) -> Vec<LearningEntry> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    content
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .filter_map(|l| serde_json::from_str::<LearningEntry>(l).ok())
+        .collect()
+}
+
+impl ConnectionGraph {
+    /// Populate the graph from learnings.jsonl by extracting concepts from
+    /// each learning's title and takeaway, then creating semantic connections
+    /// between co-occurring concepts within the same learning.
+    ///
+    /// Returns (learnings_processed, connections_created).
+    pub fn populate_from_learnings(&mut self, learnings: &[LearningEntry]) -> (usize, usize) {
+        let mut connections_created = 0;
+
+        for learning in learnings {
+            let title_concepts = extract_concepts(&learning.title);
+            let takeaway_concepts = extract_concepts(&learning.takeaway);
+
+            let mut all_concepts: Vec<String> = Vec::new();
+            let mut seen = std::collections::HashSet::new();
+            for c in title_concepts.iter().chain(takeaway_concepts.iter()) {
+                if seen.insert(c.clone()) {
+                    all_concepts.push(c.clone());
+                }
+            }
+
+            // Normalize direction alphabetically so repeated co-occurrences
+            // always strengthen the same edge.
+            for i in 0..all_concepts.len() {
+                for j in (i + 1)..all_concepts.len() {
+                    let (from, to) = if all_concepts[i] <= all_concepts[j] {
+                        (&all_concepts[i], &all_concepts[j])
+                    } else {
+                        (&all_concepts[j], &all_concepts[i])
+                    };
+                    self.activate_connection(from, to, ConnectionKind::Semantic);
+                    connections_created += 1;
+                }
+            }
+        }
+
+        (learnings.len(), connections_created)
+    }
+
+    /// Compute graph statistics.
+    pub fn compute_stats(&self) -> GraphStats {
+        let all_conns: Vec<&Connection> = self.edges.values().flat_map(|v| v.iter()).collect();
+        let total_edges = all_conns.len();
+
+        let avg_weight = if total_edges > 0 {
+            all_conns.iter().map(|c| c.weight).sum::<f64>() / total_edges as f64
+        } else {
+            0.0
+        };
+
+        let strongest = all_conns
+            .iter()
+            .max_by(|a, b| {
+                a.weight
+                    .partial_cmp(&b.weight)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|c| format!("{} → {} (w:{:.2}, {})", c.from, c.to, c.weight, c.kind));
+
+        let mut degree: HashMap<String, usize> = HashMap::new();
+        for edges in self.edges.values() {
+            for conn in edges {
+                *degree.entry(conn.from.clone()).or_insert(0) += 1;
+                *degree.entry(conn.to.clone()).or_insert(0) += 1;
+            }
+        }
+
+        let most_connected = degree
+            .iter()
+            .max_by_key(|(_, d)| *d)
+            .map(|(name, d)| format!("{name} (degree: {d})"));
+
+        let all_nodes: std::collections::HashSet<String> = {
+            let mut s = std::collections::HashSet::new();
+            for (src, edges) in &self.edges {
+                s.insert(src.clone());
+                for c in edges {
+                    s.insert(c.to.clone());
+                }
+            }
+            s
+        };
+
+        let isolated_count = self
+            .node_activations
+            .keys()
+            .filter(|k| !all_nodes.contains(*k))
+            .count();
+
+        GraphStats {
+            node_count: self.node_count(),
+            edge_count: total_edges,
+            by_kind: self.connections_by_kind(),
+            avg_weight,
+            strongest,
+            most_connected,
+            isolated_count,
+        }
+    }
+}
+
+/// Summary statistics for the connection graph.
+#[derive(Debug)]
+pub struct GraphStats {
+    pub node_count: usize,
+    pub edge_count: usize,
+    pub by_kind: HashMap<String, usize>,
+    pub avg_weight: f64,
+    pub strongest: Option<String>,
+    pub most_connected: Option<String>,
+    pub isolated_count: usize,
+}
+
 /// Parse a timestamp string (YYYY-MM-DD or YYYY-MM-DD HH:MM) to days since 2000-01-01 (approximate).
 pub fn timestamp_to_days(ts: &str) -> Option<f64> {
     let s = ts.trim().get(0..10)?;
@@ -1485,5 +1838,177 @@ mod tests {
         let graph = ConnectionGraph::default();
         let path = graph.shortest_path("a", "b");
         assert_eq!(path, None);
+    }
+
+    // ── Concept extraction tests ────────────────────────────────────────
+
+    #[test]
+    fn test_extract_concepts_basic() {
+        let concepts =
+            extract_concepts("Cleanup creates perception — you can't polish what you can't see");
+        assert!(concepts.contains(&"cleanup".to_string()));
+        assert!(concepts.contains(&"creates".to_string()));
+        assert!(concepts.contains(&"perception".to_string()));
+        assert!(concepts.contains(&"polish".to_string()));
+        assert!(!concepts.contains(&"you".to_string()));
+    }
+
+    #[test]
+    fn test_extract_concepts_filters_stop_words() {
+        let concepts = extract_concepts("the quick brown fox jumps over the lazy dog");
+        assert!(!concepts.contains(&"the".to_string()));
+        assert!(!concepts.contains(&"over".to_string()));
+        assert!(concepts.contains(&"quick".to_string()));
+        assert!(concepts.contains(&"brown".to_string()));
+        assert!(concepts.contains(&"fox".to_string()));
+    }
+
+    #[test]
+    fn test_extract_concepts_filters_short_and_numbers() {
+        let concepts = extract_concepts("Day 10 was great — 3 sessions of work in 42 minutes");
+        assert!(!concepts.contains(&"10".to_string()));
+        assert!(!concepts.contains(&"42".to_string()));
+        assert!(!concepts.contains(&"was".to_string()));
+    }
+
+    #[test]
+    fn test_extract_concepts_deduplicates() {
+        let concepts = extract_concepts("avoidance pattern avoidance ritual avoidance");
+        let avoidance_count = concepts.iter().filter(|c| *c == "avoidance").count();
+        assert_eq!(avoidance_count, 1);
+    }
+
+    #[test]
+    fn test_extract_concepts_empty_input() {
+        let concepts = extract_concepts("");
+        assert!(concepts.is_empty());
+    }
+
+    // ── Populate from learnings tests ───────────────────────────────────
+
+    #[test]
+    fn test_populate_from_learnings_creates_connections() {
+        let learnings = vec![LearningEntry {
+            title: "Avoidance pattern creates guilt".to_string(),
+            takeaway: "Self-awareness alone does not change behavior".to_string(),
+            context: String::new(),
+            source: "test".to_string(),
+            day: Some(1),
+            ts: "2026-03-10".to_string(),
+            entry_type: "lesson".to_string(),
+        }];
+
+        let mut graph = ConnectionGraph::default();
+        let (processed, connections) = graph.populate_from_learnings(&learnings);
+
+        assert_eq!(processed, 1);
+        assert!(connections > 0);
+        assert!(graph.node_count() > 0);
+        assert!(graph.connection_count() > 0);
+    }
+
+    #[test]
+    fn test_populate_strengthens_repeated_concepts() {
+        let learnings = vec![
+            LearningEntry {
+                title: "Avoidance creates guilt".to_string(),
+                takeaway: "Avoidance blocks progress".to_string(),
+                context: String::new(),
+                source: "test".to_string(),
+                day: Some(1),
+                ts: "2026-03-10".to_string(),
+                entry_type: "lesson".to_string(),
+            },
+            LearningEntry {
+                title: "Guilt from avoidance".to_string(),
+                takeaway: "Guilt is a signal not a punishment".to_string(),
+                context: String::new(),
+                source: "test".to_string(),
+                day: Some(2),
+                ts: "2026-03-11".to_string(),
+                entry_type: "lesson".to_string(),
+            },
+        ];
+
+        let mut graph = ConnectionGraph::default();
+        graph.populate_from_learnings(&learnings);
+
+        // "avoidance" and "guilt" co-occur in both learnings — alphabetically
+        // normalized to avoidance → guilt, so the edge should be activated 2+ times
+        let edges = graph.edges.get("avoidance");
+        assert!(edges.is_some(), "Should have edges from 'avoidance'");
+        let guilt_conn = edges.unwrap().iter().find(|c| c.to == "guilt");
+        assert!(guilt_conn.is_some(), "Should have avoidance → guilt edge");
+        assert!(
+            guilt_conn.unwrap().activations >= 2,
+            "Should be activated at least twice"
+        );
+        assert!(
+            guilt_conn.unwrap().weight > 0.1,
+            "Weight should grow with repeated activation"
+        );
+    }
+
+    #[test]
+    fn test_populate_empty_learnings() {
+        let mut graph = ConnectionGraph::default();
+        let (processed, connections) = graph.populate_from_learnings(&[]);
+        assert_eq!(processed, 0);
+        assert_eq!(connections, 0);
+    }
+
+    // ── Graph stats tests ───────────────────────────────────────────────
+
+    #[test]
+    fn test_compute_stats_empty_graph() {
+        let graph = ConnectionGraph::default();
+        let stats = graph.compute_stats();
+        assert_eq!(stats.node_count, 0);
+        assert_eq!(stats.edge_count, 0);
+        assert_eq!(stats.avg_weight, 0.0);
+        assert!(stats.strongest.is_none());
+        assert!(stats.most_connected.is_none());
+    }
+
+    #[test]
+    fn test_compute_stats_populated_graph() {
+        let mut graph = ConnectionGraph::default();
+        graph.activate_connection("a", "b", ConnectionKind::Semantic);
+        graph.activate_connection("a", "c", ConnectionKind::Causal);
+        graph.activate_connection("b", "c", ConnectionKind::Semantic);
+
+        let stats = graph.compute_stats();
+        assert_eq!(stats.node_count, 3);
+        assert_eq!(stats.edge_count, 3);
+        assert!(stats.avg_weight > 0.0);
+        assert!(stats.strongest.is_some());
+        assert!(stats.most_connected.is_some());
+        assert_eq!(*stats.by_kind.get("semantic").unwrap_or(&0), 2);
+        assert_eq!(*stats.by_kind.get("causal").unwrap_or(&0), 1);
+    }
+
+    // ── Load learnings test ─────────────────────────────────────────────
+
+    #[test]
+    fn test_load_learnings_from_file() {
+        let dir = std::env::temp_dir().join("yoyo_test_learnings");
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("test_learnings.jsonl");
+        let content = r#"{"type":"lesson","day":1,"ts":"2026-03-10","source":"test","title":"Test learning","context":"ctx","takeaway":"take"}
+{"type":"lesson","day":2,"ts":"2026-03-11","source":"test","title":"Another learning","context":"ctx2","takeaway":"take2"}"#;
+        fs::write(&path, content).unwrap();
+
+        let learnings = load_learnings_from(&path);
+        assert_eq!(learnings.len(), 2);
+        assert_eq!(learnings[0].title, "Test learning");
+        assert_eq!(learnings[1].title, "Another learning");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_load_learnings_missing_file() {
+        let learnings = load_learnings_from(Path::new("/nonexistent/path.jsonl"));
+        assert!(learnings.is_empty());
     }
 }

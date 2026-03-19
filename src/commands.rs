@@ -107,6 +107,8 @@ pub const GRAPH_SUBCOMMANDS: &[&str] = &[
     "activate",
     "search",
     "path",
+    "populate",
+    "stats",
 ];
 
 /// Return context-aware argument completions for a given command and partial argument.
@@ -254,7 +256,7 @@ pub fn help_text() -> String {
     );
     out.push_str("  /memories          List project-specific memories for this directory\n");
     out.push_str(
-        "  /graph <sub> [args]  Connection graph (downstream, neighbors, info, activate)\n",
+        "  /graph <sub> [args]  Connection graph (populate, stats, downstream, neighbors, info)\n",
     );
     out.push_str("  /forget <n>        Remove a project memory by index\n");
     out.push('\n');
@@ -662,6 +664,10 @@ pub fn handle_graph(input: &str) {
         handle_graph_search(args.trim());
     } else if let Some(args) = rest.strip_prefix("path") {
         handle_graph_path(args.trim());
+    } else if rest == "populate" || rest.starts_with("populate ") {
+        handle_graph_populate();
+    } else if rest == "stats" || rest.starts_with("stats ") {
+        handle_graph_stats();
     } else {
         print_graph_help();
     }
@@ -673,7 +679,9 @@ fn print_graph_help() {
     println!("         /graph info                  Show graph statistics");
     println!("         /graph activate <from> <to> <kind>  Activate a connection");
     println!("         /graph search <query>        Search concepts by substring");
-    println!("         /graph path <from> <to>      Shortest path between concepts{RESET}\n");
+    println!("         /graph path <from> <to>      Shortest path between concepts");
+    println!("         /graph populate              Populate graph from learnings.jsonl");
+    println!("         /graph stats                 Show detailed graph health metrics{RESET}\n");
 }
 
 fn handle_graph_downstream(concept: &str) {
@@ -863,6 +871,82 @@ fn handle_graph_path(args: &str) {
             println!("{DIM}  No path found between \"{from}\" and \"{to}\".{RESET}\n");
         }
     }
+}
+
+fn handle_graph_populate() {
+    println!("  Loading learnings from memory/learnings.jsonl...");
+    let learnings = crate::memory::load_learnings();
+    if learnings.is_empty() {
+        println!("{DIM}  No learnings found in memory/learnings.jsonl.{RESET}\n");
+        return;
+    }
+    println!(
+        "  Found {} learnings. Extracting concepts...",
+        learnings.len()
+    );
+
+    let mut graph = crate::memory::ConnectionGraph::load();
+    let before_nodes = graph.node_count();
+    let before_edges = graph.connection_count();
+
+    let (processed, connections) = graph.populate_from_learnings(&learnings);
+
+    match graph.save() {
+        Ok(()) => {
+            println!(
+                "  Populated graph from {} learnings ({} concept-pair activations).",
+                processed, connections
+            );
+            println!(
+                "  Graph: {} nodes (+{}), {} connections (+{})",
+                graph.node_count(),
+                graph.node_count().saturating_sub(before_nodes),
+                graph.connection_count(),
+                graph.connection_count().saturating_sub(before_edges),
+            );
+            println!("  Saved to memory/connections.jsonl\n");
+        }
+        Err(e) => {
+            println!("{DIM}  Error saving graph: {e}{RESET}\n");
+        }
+    }
+}
+
+fn handle_graph_stats() {
+    let graph = crate::memory::ConnectionGraph::load();
+    if graph.edges.is_empty() {
+        println!("{DIM}  Connection graph is empty. Run /graph populate to seed it.{RESET}\n");
+        return;
+    }
+    let stats = graph.compute_stats();
+
+    println!("  Connection Graph Health:");
+    println!("    Nodes:       {}", stats.node_count);
+    println!("    Edges:       {}", stats.edge_count);
+    println!("    Avg weight:  {:.3}", stats.avg_weight);
+
+    if !stats.by_kind.is_empty() {
+        let mut kinds: Vec<_> = stats.by_kind.iter().collect();
+        kinds.sort_by(|a, b| b.1.cmp(a.1));
+        println!("    By kind:");
+        for (kind, count) in &kinds {
+            println!("      {kind}: {count}");
+        }
+    }
+
+    if let Some(ref s) = stats.strongest {
+        println!("    Strongest:   {s}");
+    }
+    if let Some(ref m) = stats.most_connected {
+        println!("    Hub node:    {m}");
+    }
+    if stats.isolated_count > 0 {
+        println!(
+            "    Isolated:    {} nodes with zero edges",
+            stats.isolated_count
+        );
+    }
+    println!();
 }
 
 fn handle_graph_search(query: &str) {
