@@ -65,6 +65,7 @@ pub const KNOWN_COMMANDS: &[&str] = &[
     "/coupling",
     "/errors",
     "/stats",
+    "/confidence",
     "/hypotheses",
 ];
 
@@ -544,9 +545,9 @@ pub use crate::commands_project::{
 
 // Session-related handlers
 pub use crate::commands_session::{
-    auto_compact_if_needed, auto_save_on_exit, handle_compact, handle_history, handle_jump,
-    handle_load, handle_mark, handle_marks, handle_save, handle_search, handle_spawn, handle_stats,
-    last_session_exists, load_bookmarks,
+    auto_compact_if_needed, auto_save_on_exit, handle_compact, handle_confidence, handle_history,
+    handle_jump, handle_load, handle_mark, handle_marks, handle_save, handle_search, handle_spawn,
+    handle_stats, last_session_exists, load_bookmarks,
 };
 
 // Memory-related handlers

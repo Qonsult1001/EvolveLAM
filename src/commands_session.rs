@@ -1,5 +1,5 @@
 //! Session-related command handlers: /save, /load, /compact, /history, /search,
-//! /mark, /jump, /marks, /spawn, /stats.
+//! /mark, /jump, /marks, /spawn, /stats, /confidence.
 
 use crate::format::*;
 use crate::prompt::*;
@@ -667,6 +667,262 @@ pub fn format_stats_display(journal_stats: &JournalStats, error_content: &str) -
     out
 }
 
+/// A task parsed from SESSION_PLAN.md.
+#[derive(Debug, Clone)]
+pub struct PlanTask {
+    pub number: u32,
+    pub title: String,
+    pub files: Vec<String>,
+    pub description: String,
+}
+
+/// Confidence level for a task.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Confidence {
+    High,
+    Medium,
+    Low,
+}
+
+impl std::fmt::Display for Confidence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Confidence::High => write!(f, "HIGH"),
+            Confidence::Medium => write!(f, "MEDIUM"),
+            Confidence::Low => write!(f, "LOW"),
+        }
+    }
+}
+
+/// Parse tasks from SESSION_PLAN.md content.
+pub fn parse_plan_tasks(content: &str) -> Vec<PlanTask> {
+    let mut tasks = Vec::new();
+    let mut current_number = 0u32;
+    let mut current_title = String::new();
+    let mut current_files: Vec<String> = Vec::new();
+    let mut current_desc = String::new();
+    let mut in_task = false;
+
+    for line in content.lines() {
+        if let Some(rest) = line.strip_prefix("### Task ") {
+            // Save previous task
+            if in_task && current_number > 0 {
+                tasks.push(PlanTask {
+                    number: current_number,
+                    title: current_title.clone(),
+                    files: current_files.clone(),
+                    description: current_desc.trim().to_string(),
+                });
+            }
+            // Parse "### Task N: Title"
+            if let Some((num_str, title)) = rest.split_once(':') {
+                current_number = num_str.trim().parse().unwrap_or(0);
+                current_title = title.trim().to_string();
+            }
+            current_files.clear();
+            current_desc.clear();
+            in_task = true;
+        } else if in_task {
+            if let Some(files_str) = line.strip_prefix("Files:") {
+                current_files = files_str
+                    .split(',')
+                    .map(|f| f.trim().to_string())
+                    .filter(|f| !f.is_empty())
+                    .collect();
+            } else if let Some(desc) = line.strip_prefix("Description:") {
+                current_desc = desc.trim().to_string();
+            } else if !line.starts_with("Issue:") && !line.trim().is_empty() {
+                if !current_desc.is_empty() {
+                    current_desc.push(' ');
+                }
+                current_desc.push_str(line.trim());
+            }
+        }
+    }
+    // Save last task
+    if in_task && current_number > 0 {
+        tasks.push(PlanTask {
+            number: current_number,
+            title: current_title,
+            files: current_files,
+            description: current_desc.trim().to_string(),
+        });
+    }
+    tasks
+}
+
+/// Score a task's confidence based on journal familiarity and connection graph.
+pub fn score_task_confidence(
+    task: &PlanTask,
+    journal_lower: &str,
+    known_files: &[String],
+    graph_concepts: &[String],
+) -> (Confidence, Vec<String>) {
+    let mut score = 0i32;
+    let mut reasons = Vec::new();
+
+    // Check if files are familiar (mentioned in journal or exist in src/)
+    let familiar_files: Vec<_> = task
+        .files
+        .iter()
+        .filter(|f| {
+            known_files
+                .iter()
+                .any(|kf| kf.contains(f.as_str()) || f.contains(kf.as_str()))
+        })
+        .collect();
+    if !task.files.is_empty() && familiar_files.len() == task.files.len() {
+        score += 2;
+        reasons.push("all files familiar".to_string());
+    } else if !familiar_files.is_empty() {
+        score += 1;
+        reasons.push(format!(
+            "{}/{} files familiar",
+            familiar_files.len(),
+            task.files.len()
+        ));
+    } else if !task.files.is_empty() {
+        reasons.push("unfamiliar files".to_string());
+    }
+
+    // Check if task keywords appear in journal (has done similar work before)
+    let title_words: Vec<&str> = task
+        .title
+        .split_whitespace()
+        .filter(|w| w.len() > 3)
+        .collect();
+    let matching_words: Vec<&&str> = title_words
+        .iter()
+        .filter(|w| journal_lower.contains(&w.to_lowercase()))
+        .collect();
+    if matching_words.len() >= 3 {
+        score += 2;
+        reasons.push("strong journal keyword overlap".to_string());
+    } else if !matching_words.is_empty() {
+        score += 1;
+        reasons.push(format!(
+            "some journal keywords ({})",
+            matching_words
+                .iter()
+                .map(|w| w.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    } else {
+        reasons.push("no prior journal mentions".to_string());
+    }
+
+    // Check connection graph for related concepts
+    let desc_lower = task.description.to_lowercase();
+    let related_concepts: Vec<_> = graph_concepts
+        .iter()
+        .filter(|c| {
+            let cl = c.to_lowercase();
+            desc_lower.contains(&cl) || task.title.to_lowercase().contains(&cl)
+        })
+        .collect();
+    if related_concepts.len() >= 2 {
+        score += 2;
+        reasons.push(format!("graph concepts: {}", related_concepts.len()));
+    } else if !related_concepts.is_empty() {
+        score += 1;
+        reasons.push("1 graph concept".to_string());
+    }
+
+    let confidence = if score >= 4 {
+        Confidence::High
+    } else if score >= 2 {
+        Confidence::Medium
+    } else {
+        Confidence::Low
+    };
+
+    (confidence, reasons)
+}
+
+/// Format confidence display for all tasks.
+pub fn format_confidence_display(
+    tasks: &[PlanTask],
+    journal_lower: &str,
+    known_files: &[String],
+    graph_concepts: &[String],
+) -> String {
+    let mut out = String::new();
+    out.push_str("  Task Confidence Scores\n");
+    out.push_str("  ─────────────────────\n");
+
+    if tasks.is_empty() {
+        out.push_str("  No tasks found in SESSION_PLAN.md\n");
+        return out;
+    }
+
+    let mut high_count = 0;
+    let mut low_count = 0;
+
+    for task in tasks {
+        let (confidence, reasons) =
+            score_task_confidence(task, journal_lower, known_files, graph_concepts);
+        let marker = match &confidence {
+            Confidence::High => "●",
+            Confidence::Medium => "◐",
+            Confidence::Low => "○",
+        };
+        match &confidence {
+            Confidence::High => high_count += 1,
+            Confidence::Low => low_count += 1,
+            _ => {}
+        }
+        out.push_str(&format!(
+            "  {} Task {}: {} [{}]\n",
+            marker, task.number, task.title, confidence
+        ));
+        out.push_str(&format!("    Reasons: {}\n", reasons.join("; ")));
+    }
+
+    out.push('\n');
+    if low_count > 0 {
+        out.push_str(&format!(
+            "  Suggestion: {} low-confidence task(s) — consider extra verification or front-load high-confidence work.\n",
+            low_count
+        ));
+    }
+    if high_count == tasks.len() {
+        out.push_str("  All tasks high confidence — execute with conviction.\n");
+    }
+
+    out
+}
+
+/// Handle the /confidence command.
+pub fn handle_confidence() {
+    let plan = std::fs::read_to_string("SESSION_PLAN.md").unwrap_or_default();
+    let tasks = parse_plan_tasks(&plan);
+
+    let journal = std::fs::read_to_string("JOURNAL.md").unwrap_or_default();
+    let journal_lower = journal.to_lowercase();
+
+    // Collect known files from src/
+    let known_files: Vec<String> = std::fs::read_dir("src")
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Collect graph concepts
+    let graph = crate::memory::ConnectionGraph::load();
+    let graph_concepts: Vec<String> = graph
+        .search_concepts("")
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
+
+    let display = format_confidence_display(&tasks, &journal_lower, &known_files, &graph_concepts);
+    println!("{DIM}{display}{RESET}\n");
+}
+
 /// Handle the /stats command.
 pub fn handle_stats() {
     let journal = std::fs::read_to_string("JOURNAL.md").unwrap_or_default();
@@ -910,5 +1166,81 @@ mod tests {
         };
         let display = format_stats_display(&stats, "");
         assert!(display.contains("converging"));
+    }
+
+    #[test]
+    fn test_parse_plan_tasks_basic() {
+        let plan = "## Session Plan\n\n### Task 1: Fix the widget\nFiles: src/main.rs, src/format.rs\nDescription: Make the widget work properly.\nIssue: none\n\n### Task 2: Add tests\nFiles: src/commands.rs\nDescription: Write unit tests for commands.\nIssue: #42\n";
+        let tasks = parse_plan_tasks(plan);
+        assert_eq!(tasks.len(), 2);
+        assert_eq!(tasks[0].number, 1);
+        assert_eq!(tasks[0].title, "Fix the widget");
+        assert_eq!(tasks[0].files, vec!["src/main.rs", "src/format.rs"]);
+        assert!(tasks[0].description.contains("widget work properly"));
+        assert_eq!(tasks[1].number, 2);
+        assert_eq!(tasks[1].title, "Add tests");
+    }
+
+    #[test]
+    fn test_parse_plan_tasks_empty() {
+        let tasks = parse_plan_tasks("nothing here");
+        assert!(tasks.is_empty());
+    }
+
+    #[test]
+    fn test_score_task_high_confidence() {
+        let task = PlanTask {
+            number: 1,
+            title: "Fix error handling in format module".to_string(),
+            files: vec!["src/format.rs".to_string()],
+            description: "Update error classification logic".to_string(),
+        };
+        let journal =
+            "day 15: worked on error handling in the format module. fixed classification bugs.";
+        let known_files = vec!["format.rs".to_string()];
+        let concepts = vec!["error".to_string(), "classification".to_string()];
+        let (conf, _reasons) = score_task_confidence(&task, journal, &known_files, &concepts);
+        assert_eq!(conf, Confidence::High);
+    }
+
+    #[test]
+    fn test_score_task_low_confidence() {
+        let task = PlanTask {
+            number: 1,
+            title: "Implement WASM compilation target".to_string(),
+            files: vec!["src/wasm.rs".to_string()],
+            description: "Add WebAssembly support for browser execution".to_string(),
+        };
+        let journal = "day 15: worked on stats and journal parsing.";
+        let known_files = vec!["main.rs".to_string()];
+        let concepts: Vec<String> = vec![];
+        let (conf, _reasons) = score_task_confidence(&task, journal, &known_files, &concepts);
+        assert_eq!(conf, Confidence::Low);
+    }
+
+    #[test]
+    fn test_format_confidence_display_empty() {
+        let display = format_confidence_display(&[], "", &[], &[]);
+        assert!(display.contains("No tasks found"));
+    }
+
+    #[test]
+    fn test_format_confidence_display_shows_markers() {
+        let tasks = vec![PlanTask {
+            number: 1,
+            title: "Test task".to_string(),
+            files: vec!["src/main.rs".to_string()],
+            description: "A test task".to_string(),
+        }];
+        let display = format_confidence_display(&tasks, "", &[], &[]);
+        assert!(display.contains("Task 1:"));
+        assert!(display.contains("Reasons:"));
+    }
+
+    #[test]
+    fn test_confidence_display_enum() {
+        assert_eq!(format!("{}", Confidence::High), "HIGH");
+        assert_eq!(format!("{}", Confidence::Medium), "MEDIUM");
+        assert_eq!(format!("{}", Confidence::Low), "LOW");
     }
 }

@@ -429,6 +429,10 @@ pub async fn run_repl(
                 commands::handle_stats();
                 continue;
             }
+            "/confidence" => {
+                commands::handle_confidence();
+                continue;
+            }
             "/hypotheses" => {
                 commands::handle_hypotheses();
                 continue;
