@@ -1012,16 +1012,17 @@ mod tests {
     };
     use crate::commands_project::{
         build_commands_for_project, build_fix_prompt, build_project_tree, classify_failure_oneline,
-        classify_rust_error, compute_fix_rates, detect_project_name, detect_project_type,
-        detect_recurring_errors, extract_first_meaningful_line, find_files, fix_strategy,
-        format_error_classification, format_errors_display, format_health_timing_summary,
+        classify_go_error, classify_node_error, classify_python_error, classify_rust_error,
+        compute_fix_rates, detect_project_name, detect_project_type, detect_recurring_errors,
+        extract_first_meaningful_line, find_files, fix_strategy, format_error_classification,
+        format_errors_display, format_generic_categories, format_health_timing_summary,
         format_hypotheses_display, format_project_index, format_tree_from_paths, fuzzy_score,
-        generate_init_content, health_checks_for_project, highlight_match, is_binary_extension,
-        lint_command_for_project, parse_error_log, parse_hypotheses, parse_test_summary,
-        run_health_check_for_project, run_health_checks_full_output,
+        generate_init_content, generic_fix_strategy, health_checks_for_project, highlight_match,
+        is_binary_extension, lint_command_for_project, parse_error_log, parse_hypotheses,
+        parse_test_summary, run_health_check_for_project, run_health_checks_full_output,
         run_health_checks_with_classification, run_shell_command, scan_important_dirs,
         scan_important_files, summarize_error_log, test_command_for_project, ErrorLogEntry,
-        Hypothesis, IndexEntry, ProjectType, RustErrorCategory, TestSummary,
+        GenericErrorCategory, Hypothesis, IndexEntry, ProjectType, RustErrorCategory, TestSummary,
     };
     use crate::commands_session::{parse_bookmark_name, parse_spawn_task, Bookmarks};
     use crate::memory::{
@@ -4051,5 +4052,179 @@ test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
         assert!(display.contains("borrow_checker"));
         assert!(display.contains("Recurring issue"));
         assert!(display.contains("Check ownership"));
+    }
+
+    // ── Multi-language error classification tests ─────────────────────
+
+    #[test]
+    fn test_classify_python_syntax_error() {
+        let output = "  File \"main.py\", line 5\n    print(\"hello\"\nSyntaxError: unexpected EOF while parsing\n";
+        let cats = classify_python_error(output);
+        assert!(cats
+            .iter()
+            .any(|(c, _)| *c == GenericErrorCategory::SyntaxError));
+    }
+
+    #[test]
+    fn test_classify_python_import_error() {
+        let output = "Traceback (most recent call last):\n  File \"main.py\", line 1, in <module>\nImportError: No module named 'nonexistent'\n";
+        let cats = classify_python_error(output);
+        assert!(cats
+            .iter()
+            .any(|(c, _)| *c == GenericErrorCategory::ImportError));
+    }
+
+    #[test]
+    fn test_classify_python_type_error() {
+        let output = "TypeError: unsupported operand type(s) for +: 'int' and 'str'\n";
+        let cats = classify_python_error(output);
+        assert!(cats
+            .iter()
+            .any(|(c, _)| *c == GenericErrorCategory::TypeError));
+    }
+
+    #[test]
+    fn test_classify_python_name_error() {
+        let output = "NameError: name 'foo' is not defined\n";
+        let cats = classify_python_error(output);
+        assert!(cats
+            .iter()
+            .any(|(c, _)| *c == GenericErrorCategory::NameError));
+    }
+
+    #[test]
+    fn test_classify_python_indentation_error() {
+        let output = "IndentationError: unexpected indent\n";
+        let cats = classify_python_error(output);
+        assert!(cats
+            .iter()
+            .any(|(c, _)| *c == GenericErrorCategory::IndentationError));
+    }
+
+    #[test]
+    fn test_classify_node_syntax_error() {
+        let output = "SyntaxError: Unexpected token }\n    at Module._compile\n";
+        let cats = classify_node_error(output);
+        assert!(cats
+            .iter()
+            .any(|(c, _)| *c == GenericErrorCategory::SyntaxError));
+    }
+
+    #[test]
+    fn test_classify_node_reference_error() {
+        let output = "ReferenceError: foo is not defined\n    at Object.<anonymous>\n";
+        let cats = classify_node_error(output);
+        assert!(cats
+            .iter()
+            .any(|(c, _)| *c == GenericErrorCategory::ReferenceError));
+    }
+
+    #[test]
+    fn test_classify_node_type_error() {
+        let output = "TypeError: Cannot read properties of undefined (reading 'length')\n";
+        let cats = classify_node_error(output);
+        assert!(cats
+            .iter()
+            .any(|(c, _)| *c == GenericErrorCategory::TypeError));
+    }
+
+    #[test]
+    fn test_classify_node_module_not_found() {
+        let output = "Error: Cannot find module 'express'\n    at Module._resolveFilename\nERR_MODULE_NOT_FOUND\n";
+        let cats = classify_node_error(output);
+        assert!(cats
+            .iter()
+            .any(|(c, _)| *c == GenericErrorCategory::ModuleNotFound));
+    }
+
+    #[test]
+    fn test_classify_go_undefined() {
+        let output = "./main.go:10:2: undefined: fmt\n";
+        let cats = classify_go_error(output);
+        assert!(cats
+            .iter()
+            .any(|(c, _)| *c == GenericErrorCategory::UndefinedSymbol));
+    }
+
+    #[test]
+    fn test_classify_go_cannot_use() {
+        let output = "./main.go:15:10: cannot use x (type int) as type string\n";
+        let cats = classify_go_error(output);
+        assert!(cats
+            .iter()
+            .any(|(c, _)| *c == GenericErrorCategory::TypeError));
+    }
+
+    #[test]
+    fn test_classify_go_unused_import() {
+        let output = "./main.go:3:2: \"fmt\" imported and not used\n";
+        let cats = classify_go_error(output);
+        assert!(cats
+            .iter()
+            .any(|(c, _)| *c == GenericErrorCategory::UnusedImport));
+    }
+
+    #[test]
+    fn test_classify_go_test_failure() {
+        let output = "--- FAIL: TestAdd (0.00s)\n    main_test.go:10: expected 5, got 4\nFAIL\tgithub.com/test/pkg\t0.001s\n";
+        let cats = classify_go_error(output);
+        assert!(cats
+            .iter()
+            .any(|(c, _)| *c == GenericErrorCategory::TestFailure));
+    }
+
+    #[test]
+    fn test_classify_python_unknown_fallback() {
+        let output = "some random output\n";
+        let cats = classify_python_error(output);
+        assert_eq!(cats.len(), 1);
+        assert_eq!(cats[0].0, GenericErrorCategory::Unknown);
+    }
+
+    #[test]
+    fn test_format_generic_categories_non_empty() {
+        let cats = vec![
+            (GenericErrorCategory::SyntaxError, 2),
+            (GenericErrorCategory::ImportError, 1),
+        ];
+        let result = format_generic_categories(&cats);
+        assert!(result.contains("syntax_error(2)"));
+        assert!(result.contains("import_error(1)"));
+    }
+
+    #[test]
+    fn test_format_generic_categories_unknown_only() {
+        let cats = vec![(GenericErrorCategory::Unknown, 1)];
+        let result = format_generic_categories(&cats);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_generic_fix_strategy_returns_nonempty() {
+        let strategy = generic_fix_strategy(GenericErrorCategory::SyntaxError);
+        assert!(!strategy.is_empty());
+        let strategy = generic_fix_strategy(GenericErrorCategory::ImportError);
+        assert!(!strategy.is_empty());
+    }
+
+    #[test]
+    fn test_generic_error_category_display() {
+        assert_eq!(
+            format!("{}", GenericErrorCategory::SyntaxError),
+            "syntax_error"
+        );
+        assert_eq!(
+            format!("{}", GenericErrorCategory::ImportError),
+            "import_error"
+        );
+        assert_eq!(format!("{}", GenericErrorCategory::TypeError), "type_error");
+        assert_eq!(
+            format!("{}", GenericErrorCategory::ModuleNotFound),
+            "module_not_found"
+        );
+        assert_eq!(
+            format!("{}", GenericErrorCategory::UndefinedSymbol),
+            "undefined_symbol"
+        );
     }
 }

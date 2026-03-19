@@ -647,6 +647,241 @@ pub fn classify_rust_error(output: &str) -> Vec<(RustErrorCategory, usize)> {
     result
 }
 
+/// Language-agnostic error category for Python, Node, and Go projects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GenericErrorCategory {
+    SyntaxError,
+    ImportError,
+    TypeError,
+    NameError,
+    IndentationError,
+    ReferenceError,
+    ModuleNotFound,
+    UndefinedSymbol,
+    UnusedImport,
+    TestFailure,
+    Unknown,
+}
+
+impl std::fmt::Display for GenericErrorCategory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GenericErrorCategory::SyntaxError => write!(f, "syntax_error"),
+            GenericErrorCategory::ImportError => write!(f, "import_error"),
+            GenericErrorCategory::TypeError => write!(f, "type_error"),
+            GenericErrorCategory::NameError => write!(f, "name_error"),
+            GenericErrorCategory::IndentationError => write!(f, "indentation_error"),
+            GenericErrorCategory::ReferenceError => write!(f, "reference_error"),
+            GenericErrorCategory::ModuleNotFound => write!(f, "module_not_found"),
+            GenericErrorCategory::UndefinedSymbol => write!(f, "undefined_symbol"),
+            GenericErrorCategory::UnusedImport => write!(f, "unused_import"),
+            GenericErrorCategory::TestFailure => write!(f, "test_failure"),
+            GenericErrorCategory::Unknown => write!(f, "unknown"),
+        }
+    }
+}
+
+/// Fix strategy hint for generic error categories.
+pub fn generic_fix_strategy(cat: GenericErrorCategory) -> &'static str {
+    match cat {
+        GenericErrorCategory::SyntaxError => {
+            "Check for missing brackets, colons, semicolons, or unexpected tokens near the reported line."
+        }
+        GenericErrorCategory::ImportError => {
+            "Verify the module name, check if the package is installed (pip install / npm install), or check the import path."
+        }
+        GenericErrorCategory::TypeError => {
+            "Check argument types and counts. Verify the operation is valid for the given types."
+        }
+        GenericErrorCategory::NameError => {
+            "The variable or function is not defined. Check for typos, missing imports, or scope issues."
+        }
+        GenericErrorCategory::IndentationError => {
+            "Fix the indentation — Python uses consistent spaces (usually 4). Don't mix tabs and spaces."
+        }
+        GenericErrorCategory::ReferenceError => {
+            "The variable is not defined. Check for typos, declaration order, or scope issues."
+        }
+        GenericErrorCategory::ModuleNotFound => {
+            "The module/package is not installed or the path is wrong. Run the package manager install command."
+        }
+        GenericErrorCategory::UndefinedSymbol => {
+            "The symbol is not declared or imported. Check spelling and imports."
+        }
+        GenericErrorCategory::UnusedImport => {
+            "Remove the unused import or use it. In Go, unused imports are compile errors."
+        }
+        GenericErrorCategory::TestFailure => {
+            "Read the assertion message carefully. Check expected vs actual values."
+        }
+        GenericErrorCategory::Unknown => {
+            "Read the error message carefully and fix the root cause."
+        }
+    }
+}
+
+/// Classify Python error output into categories.
+pub fn classify_python_error(output: &str) -> Vec<(GenericErrorCategory, usize)> {
+    let mut counts: std::collections::HashMap<GenericErrorCategory, usize> =
+        std::collections::HashMap::new();
+
+    for line in output.lines() {
+        let lower = line.to_lowercase();
+
+        if lower.contains("syntaxerror") || lower.contains("syntax error") {
+            *counts.entry(GenericErrorCategory::SyntaxError).or_insert(0) += 1;
+        } else if lower.contains("importerror")
+            || lower.contains("modulenotfounderror")
+            || lower.contains("no module named")
+        {
+            *counts.entry(GenericErrorCategory::ImportError).or_insert(0) += 1;
+        } else if lower.contains("typeerror") {
+            *counts.entry(GenericErrorCategory::TypeError).or_insert(0) += 1;
+        } else if lower.contains("nameerror") {
+            *counts.entry(GenericErrorCategory::NameError).or_insert(0) += 1;
+        } else if lower.contains("indentationerror") || lower.contains("taberror") {
+            *counts
+                .entry(GenericErrorCategory::IndentationError)
+                .or_insert(0) += 1;
+        } else if lower.contains("assert") && lower.contains("error")
+            || lower.contains("failed")
+                && (lower.contains("test")
+                    || lower.contains("pytest")
+                    || lower.contains("unittest"))
+        {
+            *counts.entry(GenericErrorCategory::TestFailure).or_insert(0) += 1;
+        }
+    }
+
+    if counts.is_empty() {
+        counts.insert(GenericErrorCategory::Unknown, 1);
+    }
+
+    let mut result: Vec<(GenericErrorCategory, usize)> = counts.into_iter().collect();
+    result.sort_by(|a, b| b.1.cmp(&a.1));
+    result
+}
+
+/// Classify Node.js error output into categories.
+pub fn classify_node_error(output: &str) -> Vec<(GenericErrorCategory, usize)> {
+    let mut counts: std::collections::HashMap<GenericErrorCategory, usize> =
+        std::collections::HashMap::new();
+
+    for line in output.lines() {
+        let lower = line.to_lowercase();
+
+        if lower.contains("syntaxerror") || lower.contains("unexpected token") {
+            *counts.entry(GenericErrorCategory::SyntaxError).or_insert(0) += 1;
+        } else if lower.contains("referenceerror") {
+            *counts
+                .entry(GenericErrorCategory::ReferenceError)
+                .or_insert(0) += 1;
+        } else if lower.contains("typeerror") {
+            *counts.entry(GenericErrorCategory::TypeError).or_insert(0) += 1;
+        } else if lower.contains("module_not_found")
+            || lower.contains("cannot find module")
+            || lower.contains("err_module_not_found")
+        {
+            *counts
+                .entry(GenericErrorCategory::ModuleNotFound)
+                .or_insert(0) += 1;
+        } else if (lower.contains("failing") || lower.contains("failed"))
+            && (lower.contains("test") || lower.contains("spec") || lower.contains("suite"))
+        {
+            *counts.entry(GenericErrorCategory::TestFailure).or_insert(0) += 1;
+        }
+    }
+
+    if counts.is_empty() {
+        counts.insert(GenericErrorCategory::Unknown, 1);
+    }
+
+    let mut result: Vec<(GenericErrorCategory, usize)> = counts.into_iter().collect();
+    result.sort_by(|a, b| b.1.cmp(&a.1));
+    result
+}
+
+/// Classify Go error output into categories.
+pub fn classify_go_error(output: &str) -> Vec<(GenericErrorCategory, usize)> {
+    let mut counts: std::collections::HashMap<GenericErrorCategory, usize> =
+        std::collections::HashMap::new();
+
+    for line in output.lines() {
+        let lower = line.to_lowercase();
+
+        if lower.contains("undefined:") || lower.contains("undeclared name") {
+            *counts
+                .entry(GenericErrorCategory::UndefinedSymbol)
+                .or_insert(0) += 1;
+        } else if lower.contains("cannot use") || lower.contains("type mismatch") {
+            *counts.entry(GenericErrorCategory::TypeError).or_insert(0) += 1;
+        } else if lower.contains("imported and not used") {
+            *counts
+                .entry(GenericErrorCategory::UnusedImport)
+                .or_insert(0) += 1;
+        } else if lower.contains("syntax error")
+            || lower.contains("expected") && lower.contains("got")
+        {
+            *counts.entry(GenericErrorCategory::SyntaxError).or_insert(0) += 1;
+        } else if lower.contains("--- fail") || lower.contains("fail\t") {
+            *counts.entry(GenericErrorCategory::TestFailure).or_insert(0) += 1;
+        }
+    }
+
+    if counts.is_empty() {
+        counts.insert(GenericErrorCategory::Unknown, 1);
+    }
+
+    let mut result: Vec<(GenericErrorCategory, usize)> = counts.into_iter().collect();
+    result.sort_by(|a, b| b.1.cmp(&a.1));
+    result
+}
+
+/// Classify error output for any project type.
+/// Returns a formatted one-line summary of detected categories.
+pub fn classify_error_multilang(output: &str) -> String {
+    let project_type = detect_project_type(&std::env::current_dir().unwrap_or_default());
+
+    match project_type {
+        ProjectType::Rust => {
+            let cats = classify_rust_error(output);
+            if cats.is_empty() || (cats.len() == 1 && cats[0].0 == RustErrorCategory::Unknown) {
+                return String::new();
+            }
+            cats.iter()
+                .filter(|(cat, _)| *cat != RustErrorCategory::Unknown)
+                .map(|(cat, count)| format!("{cat}({count})"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+        ProjectType::Python => {
+            let cats = classify_python_error(output);
+            format_generic_categories(&cats)
+        }
+        ProjectType::Node => {
+            let cats = classify_node_error(output);
+            format_generic_categories(&cats)
+        }
+        ProjectType::Go => {
+            let cats = classify_go_error(output);
+            format_generic_categories(&cats)
+        }
+        _ => String::new(),
+    }
+}
+
+/// Format generic error categories into a one-line summary.
+pub fn format_generic_categories(cats: &[(GenericErrorCategory, usize)]) -> String {
+    if cats.is_empty() || (cats.len() == 1 && cats[0].0 == GenericErrorCategory::Unknown) {
+        return String::new();
+    }
+    cats.iter()
+        .filter(|(cat, _)| *cat != GenericErrorCategory::Unknown)
+        .map(|(cat, count)| format!("{cat}({count})"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// Format error classification results for terminal display.
 /// Shows detected categories with counts and top strategy hints.
 pub fn format_error_classification(failures: &[(&str, &str)]) -> String {
@@ -679,35 +914,50 @@ pub fn format_error_classification(failures: &[(&str, &str)]) -> String {
 }
 
 /// Build a prompt describing health check failures for the AI to fix.
-/// Includes error classification and strategy hints for Rust projects.
+/// Includes error classification and strategy hints for Rust and other languages.
 pub fn build_fix_prompt(failures: &[(&str, &str)]) -> String {
     if failures.is_empty() {
         return String::new();
     }
+    let project_type = detect_project_type(&std::env::current_dir().unwrap_or_default());
     let mut prompt = String::from(
         "Fix the following build/lint errors in this project. Read the relevant files, understand the errors, and apply fixes:\n\n",
     );
     for (name, output) in failures {
-        // Classify errors for Rust projects
-        let categories = classify_rust_error(output);
-        let cat_summary: Vec<String> = categories
-            .iter()
-            .map(|(cat, count)| format!("{cat} ({count})"))
-            .collect();
-
         prompt.push_str(&format!("## {name} errors:\n"));
-        prompt.push_str(&format!(
-            "**Error categories:** {}\n",
-            cat_summary.join(", ")
-        ));
 
-        // Add strategy hints for top categories
-        for (cat, _) in categories.iter().take(2) {
-            prompt.push_str(&format!(
-                "**Strategy for {}:** {}\n",
-                cat,
-                fix_strategy(*cat)
-            ));
+        match project_type {
+            ProjectType::Rust => {
+                let categories = classify_rust_error(output);
+                let cat_summary: Vec<String> = categories
+                    .iter()
+                    .map(|(cat, count)| format!("{cat} ({count})"))
+                    .collect();
+                prompt.push_str(&format!(
+                    "**Error categories:** {}\n",
+                    cat_summary.join(", ")
+                ));
+                for (cat, _) in categories.iter().take(2) {
+                    prompt.push_str(&format!(
+                        "**Strategy for {}:** {}\n",
+                        cat,
+                        fix_strategy(*cat)
+                    ));
+                }
+            }
+            ProjectType::Python => {
+                let categories = classify_python_error(output);
+                build_generic_fix_hints(&mut prompt, &categories);
+            }
+            ProjectType::Node => {
+                let categories = classify_node_error(output);
+                build_generic_fix_hints(&mut prompt, &categories);
+            }
+            ProjectType::Go => {
+                let categories = classify_go_error(output);
+                build_generic_fix_hints(&mut prompt, &categories);
+            }
+            _ => {}
         }
 
         prompt.push_str(&format!("\n```\n{output}\n```\n\n"));
@@ -716,6 +966,27 @@ pub fn build_fix_prompt(failures: &[(&str, &str)]) -> String {
         "After fixing, run the failing checks again to verify. Fix any remaining issues.",
     );
     prompt
+}
+
+/// Append generic error category hints to a fix prompt.
+fn build_generic_fix_hints(prompt: &mut String, categories: &[(GenericErrorCategory, usize)]) {
+    let cat_summary: Vec<String> = categories
+        .iter()
+        .map(|(cat, count)| format!("{cat} ({count})"))
+        .collect();
+    prompt.push_str(&format!(
+        "**Error categories:** {}\n",
+        cat_summary.join(", ")
+    ));
+    for (cat, _) in categories.iter().take(2) {
+        if *cat != GenericErrorCategory::Unknown {
+            prompt.push_str(&format!(
+                "**Strategy for {}:** {}\n",
+                cat,
+                generic_fix_strategy(*cat)
+            ));
+        }
+    }
 }
 
 pub fn handle_health() {
@@ -829,30 +1100,39 @@ pub fn format_health_timing_summary(
 }
 
 /// Classify a single failure's error output into a one-line summary.
+/// Tries Rust classification first, then Python/Node/Go based on project type.
 /// Returns empty string if no meaningful classification found.
 pub fn classify_failure_oneline(_name: &str, error_output: &str) -> String {
+    // Try Rust classification first
     let categories = classify_rust_error(error_output);
-    if categories.is_empty()
-        || (categories.len() == 1 && categories[0].0 == RustErrorCategory::Unknown)
-    {
-        return String::new();
+    let rust_has_result = !(categories.is_empty()
+        || categories.len() == 1 && categories[0].0 == RustErrorCategory::Unknown);
+
+    if rust_has_result {
+        let cat_parts: Vec<String> = categories
+            .iter()
+            .filter(|(cat, _)| *cat != RustErrorCategory::Unknown)
+            .map(|(cat, count)| format!("{count} {cat}"))
+            .collect();
+        if !cat_parts.is_empty() {
+            let mut line = format!("→ {}", cat_parts.join(", "));
+            if let Some((top_cat, _)) = categories
+                .iter()
+                .find(|(cat, _)| *cat != RustErrorCategory::Unknown)
+            {
+                line.push_str(&format!(" — {}", fix_strategy(*top_cat)));
+            }
+            return line;
+        }
     }
-    let cat_parts: Vec<String> = categories
-        .iter()
-        .filter(|(cat, _)| *cat != RustErrorCategory::Unknown)
-        .map(|(cat, count)| format!("{count} {cat}"))
-        .collect();
-    if cat_parts.is_empty() {
-        return String::new();
+
+    // Fall back to multi-language classification
+    let multilang = classify_error_multilang(error_output);
+    if !multilang.is_empty() {
+        return format!("→ {multilang}");
     }
-    let mut line = format!("→ {}", cat_parts.join(", "));
-    if let Some((top_cat, _)) = categories
-        .iter()
-        .find(|(cat, _)| *cat != RustErrorCategory::Unknown)
-    {
-        line.push_str(&format!(" — {}", fix_strategy(*top_cat)));
-    }
-    line
+
+    String::new()
 }
 
 /// Handle the /fix command. Returns Some(fix_prompt) if failures were sent to AI, None otherwise.
