@@ -27,11 +27,12 @@ pub fn append_runtime_error(category: &str, message: &str, tool_name: Option<&st
         "{{\"ts\":\"{ts}\",\"category\":\"{category}\"{tool_json},\"message\":\"{safe_msg}\"}}"
     );
 
-    let log_path = ".yoyo/runtime_errors.jsonl";
-    let _ = std::fs::create_dir_all(".yoyo");
+    let state_dir = crate::cli::yoyo_state_dir();
+    let log_path = state_dir.join("runtime_errors.jsonl");
+    let _ = std::fs::create_dir_all(&state_dir);
 
     // Deduplicate: check if last line has the same category+message
-    if let Ok(existing) = std::fs::read_to_string(log_path) {
+    if let Ok(existing) = std::fs::read_to_string(&log_path) {
         if let Some(last_line) = existing.lines().rev().find(|l| !l.trim().is_empty()) {
             if is_duplicate_runtime_entry(last_line, category, &safe_msg, &ts) {
                 return;
@@ -42,7 +43,7 @@ pub fn append_runtime_error(category: &str, message: &str, tool_name: Option<&st
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(log_path)
+        .open(&log_path)
     {
         let _ = writeln!(f, "{}", line);
     }
@@ -111,6 +112,31 @@ fn chrono_now_iso() -> String {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
     format!("{y:04}-{m:02}-{d:02}T{hours:02}:{minutes:02}:{seconds:02}Z")
+}
+
+/// Emit a tool event to `.yoyo/tool_events.jsonl` for IDE integration.
+/// VSCode extensions can watch this file to show inline diffs, file creates, etc.
+pub fn emit_tool_event(tool: &str, path: &str, old_text: &str, new_text: &str) {
+    let state_dir = crate::cli::yoyo_state_dir();
+    let _ = std::fs::create_dir_all(&state_dir);
+    let event_path = state_dir.join("tool_events.jsonl");
+
+    // Build JSON using serde_json for correct escaping
+    let event = serde_json::json!({
+        "ts": chrono_now_iso(),
+        "tool": tool,
+        "path": path,
+        "old_text": old_text,
+        "new_text": new_text,
+    });
+
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(event_path)
+    {
+        let _ = writeln!(f, "{}", event);
+    }
 }
 
 /// Calculate exponential backoff delay for a given retry attempt (1-indexed).
@@ -405,6 +431,15 @@ async fn run_prompt_once(agent: &mut Agent, input: &str) -> PromptResult {
     let mut md_renderer = MarkdownRenderer::new();
     let mut spinner: Option<Spinner> = Some(Spinner::start());
 
+    // IDE response streaming: write raw markdown to .yoyo/response.md
+    let response_dir = crate::cli::yoyo_state_dir();
+    let response_path = response_dir.join("response.md");
+    if let Err(e) = std::fs::create_dir_all(&response_dir) {
+        eprintln!("{DIM}  (IDE response dir failed: {e}){RESET}");
+    }
+    // Clear previous response at start of each prompt
+    let _ = std::fs::write(&response_path, "");
+
     loop {
         tokio::select! {
             event = rx.recv() => {
@@ -437,6 +472,18 @@ async fn run_prompt_once(agent: &mut Agent, input: &str) -> PromptResult {
                             if !diff.is_empty() {
                                 println!();
                                 println!("{diff}");
+                            }
+                            // Emit tool event for IDE integration (inline diffs)
+                            let file_path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                            if !file_path.is_empty() {
+                                emit_tool_event("edit_file", file_path, old_text, new_text);
+                            }
+                        } else if tool_name == "write_file" || tool_name == "create_file" {
+                            // Emit create event for IDE integration
+                            let file_path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                            let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                            if !file_path.is_empty() {
+                                emit_tool_event(&tool_name, file_path, "", content);
                             }
                         }
                         io::stdout().flush().ok();
@@ -496,6 +543,8 @@ async fn run_prompt_once(agent: &mut Agent, input: &str) -> PromptResult {
                             in_text = true;
                         }
                         collected_text.push_str(&delta);
+                        // Stream raw markdown to file for IDE webview rendering
+                        let _ = std::fs::write(&response_path, &collected_text);
                         let rendered = md_renderer.render_delta(&delta);
                         if !rendered.is_empty() {
                             print!("{}", rendered);
@@ -514,6 +563,10 @@ async fn run_prompt_once(agent: &mut Agent, input: &str) -> PromptResult {
                     AgentEvent::AgentEnd { messages } => {
                         // Stop spinner if still running
                         if let Some(s) = spinner.take() { s.stop(); }
+                        // Write final response to IDE response file
+                        if !collected_text.is_empty() {
+                            let _ = std::fs::write(&response_path, &collected_text);
+                        }
                         let mut logged_error: Option<String> = None;
                         for msg in &messages {
                             if let AgentMessage::Llm(Message::Assistant { usage: msg_usage, stop_reason, error_message, .. }) = msg {
@@ -538,6 +591,7 @@ async fn run_prompt_once(agent: &mut Agent, input: &str) -> PromptResult {
                                             retriable_error = Some(err_msg.clone());
                                         } else {
                                             eprintln!("\n{RED}  error: {err_msg}{RESET}");
+                                            print_connection_diagnostic(err_msg);
                                         }
                                     }
                                 }
@@ -663,6 +717,7 @@ pub async fn run_prompt(
                     // Exhausted all retries — show the final error
                     eprintln!("\n{RED}  error: {error_msg}{RESET}");
                     eprintln!("{DIM}  (failed after {} attempts){RESET}", MAX_RETRIES + 1);
+                    print_connection_diagnostic(&error_msg);
                 }
             }
         }
@@ -675,6 +730,105 @@ pub async fn run_prompt(
     print_usage(&total_usage, session_total, model, prompt_start.elapsed());
     println!();
     collected_text
+}
+
+/// Print a helpful diagnostic when a connection error is detected.
+pub fn print_connection_diagnostic(error_msg: &str) {
+    let lower = error_msg.to_lowercase();
+    let is_connection_error = lower.contains("error sending request")
+        || lower.contains("connection refused")
+        || lower.contains("connect error")
+        || lower.contains("dns error")
+        || lower.contains("no such host")
+        || lower.contains("network is unreachable");
+
+    if !is_connection_error {
+        return;
+    }
+
+    // Try to extract the URL from the error message
+    let url_hint = if let Some(start) = error_msg.find("http://").or(error_msg.find("https://")) {
+        let rest = &error_msg[start..];
+        let url_end = rest
+            .find(|c: char| c.is_whitespace() || c == '\'' || c == '"')
+            .unwrap_or(rest.len());
+        Some(&rest[..url_end])
+    } else if lower.contains("localhost") || lower.contains("127.0.0.1") {
+        Some("localhost")
+    } else {
+        None
+    };
+
+    eprintln!();
+    if let Some(url) = url_hint {
+        eprintln!("{YELLOW}  Cannot reach provider at {url}{RESET}");
+    } else {
+        eprintln!("{YELLOW}  Cannot reach the configured provider endpoint.{RESET}");
+    }
+    eprintln!("{DIM}  Possible causes:{RESET}");
+    if lower.contains("localhost") || lower.contains("127.0.0.1") || lower.contains("11434") {
+        eprintln!("{DIM}    - Is Ollama running? Try: ollama serve{RESET}");
+    }
+    if lower.contains("openrouter") || lower.contains("groq") || lower.contains("openai") {
+        eprintln!("{DIM}    - Check your internet connection{RESET}");
+        eprintln!("{DIM}    - Verify your API key is correct{RESET}");
+    }
+    eprintln!("{DIM}    - Run: yoyo /doctor  (to check endpoint reachability){RESET}");
+}
+
+/// Check if the configured provider endpoint is reachable (TCP connect test).
+/// Returns (reachable, latency_ms, error_message).
+pub fn check_endpoint_reachable(
+    provider: &str,
+    base_url: Option<&str>,
+) -> (bool, Option<u64>, Option<String>) {
+    let url = match base_url {
+        Some(url) => url.to_string(),
+        None => match provider {
+            "anthropic" => "https://api.anthropic.com".to_string(),
+            "openai" => "https://api.openai.com".to_string(),
+            "ollama" => "http://localhost:11434".to_string(),
+            "groq" => "https://api.groq.com".to_string(),
+            "openrouter" => "https://openrouter.ai".to_string(),
+            _ => return (false, None, Some("Unknown provider".to_string())),
+        },
+    };
+
+    // Parse host:port from URL
+    let stripped = url
+        .trim_start_matches("https://")
+        .trim_start_matches("http://");
+    let is_https = url.starts_with("https://");
+    let (host, port) = if let Some(colon_pos) = stripped.find(':') {
+        let host = &stripped[..colon_pos];
+        let port_str = stripped[colon_pos + 1..].split('/').next().unwrap_or("");
+        let port: u16 = port_str.parse().unwrap_or(if is_https { 443 } else { 80 });
+        (host.to_string(), port)
+    } else {
+        let host = stripped.split('/').next().unwrap_or(stripped);
+        (host.to_string(), if is_https { 443 } else { 80 })
+    };
+
+    let addr = format!("{host}:{port}");
+    let start = std::time::Instant::now();
+
+    match std::net::TcpStream::connect_timeout(
+        &addr.parse().unwrap_or_else(|_| {
+            // DNS resolution via ToSocketAddrs
+            use std::net::ToSocketAddrs;
+            addr.to_socket_addrs()
+                .ok()
+                .and_then(|mut addrs| addrs.next())
+                .unwrap_or_else(|| std::net::SocketAddr::from(([127, 0, 0, 1], port)))
+        }),
+        std::time::Duration::from_secs(5),
+    ) {
+        Ok(_) => {
+            let latency = start.elapsed().as_millis() as u64;
+            (true, Some(latency), None)
+        }
+        Err(e) => (false, None, Some(format!("{e}"))),
+    }
 }
 
 #[cfg(test)]
@@ -1159,5 +1313,28 @@ mod tests {
             "error",
             "2026-03-19T10:01:01Z"
         ));
+    }
+
+    #[test]
+    fn test_check_endpoint_reachable_unknown_provider() {
+        let (ok, _, err) = check_endpoint_reachable("nonexistent_provider", None);
+        assert!(!ok);
+        assert!(err.unwrap().contains("Unknown provider"));
+    }
+
+    #[test]
+    fn test_check_endpoint_reachable_bad_host() {
+        let (ok, _, err) = check_endpoint_reachable("custom", Some("http://192.0.2.1:1"));
+        assert!(!ok);
+        assert!(err.is_some());
+    }
+
+    #[test]
+    fn test_print_connection_diagnostic_does_not_panic() {
+        // Should not panic on various error messages
+        print_connection_diagnostic("error sending request for url (http://localhost:11434)");
+        print_connection_diagnostic("connection refused");
+        print_connection_diagnostic("some other error");
+        print_connection_diagnostic("");
     }
 }

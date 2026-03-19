@@ -422,6 +422,10 @@ pub async fn run_repl(
                 commands::handle_health();
                 continue;
             }
+            "/doctor" => {
+                commands::handle_doctor(&agent_config.provider, agent_config.base_url.as_deref());
+                continue;
+            }
             s if s == "/errors" || s.starts_with("/errors ") => {
                 commands::handle_errors(input);
                 continue;

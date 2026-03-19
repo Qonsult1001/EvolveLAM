@@ -1540,6 +1540,39 @@ pub fn handle_health() {
     println!("{DIM}{timing}{RESET}\n");
 }
 
+/// Check if the configured provider endpoint is reachable.
+pub fn handle_doctor(provider: &str, base_url: Option<&str>) {
+    println!("{BOLD}  yoyo /doctor — endpoint check{RESET}\n");
+    println!("{DIM}  Provider: {provider}{RESET}");
+    if let Some(url) = base_url {
+        println!("{DIM}  Base URL: {url}{RESET}");
+    }
+    println!();
+
+    let (reachable, latency, error) = crate::prompt::check_endpoint_reachable(provider, base_url);
+
+    if reachable {
+        let ms = latency.unwrap_or(0);
+        println!("{GREEN}  ✓ Endpoint reachable ({ms}ms){RESET}");
+    } else {
+        let err = error.unwrap_or_else(|| "unknown error".to_string());
+        println!("{RED}  ✗ Cannot reach endpoint: {err}{RESET}");
+        println!();
+        match provider {
+            "ollama" => {
+                println!("{DIM}  Suggestion: Start Ollama with 'ollama serve'{RESET}");
+            }
+            "anthropic" | "openai" | "groq" | "openrouter" => {
+                println!("{DIM}  Suggestion: Check your internet connection and API key{RESET}");
+            }
+            _ => {
+                println!("{DIM}  Suggestion: Verify the base URL is correct{RESET}");
+            }
+        }
+    }
+    println!();
+}
+
 /// Run health checks and classify failures.
 /// Returns (name, passed, display_detail, classification_summary, elapsed).
 pub fn run_health_checks_with_classification(
