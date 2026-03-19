@@ -114,6 +114,60 @@ impl AgentTool for GuardedTool {
     }
 }
 
+/// Binary file extensions that should not be read (wastes tokens, produces no useful output).
+const BINARY_EXTENSIONS: &[&str] = &[
+    "so", "dll", "exe", "o", "a", "dylib", "pyc", "pyo", "class", "jar", "wasm", "bin", "obj",
+    "lib", "pdb", "dSYM", "whl", "egg", "png", "jpg", "jpeg", "gif", "bmp", "ico", "webp", "mp3",
+    "mp4", "wav", "avi", "mov", "mkv", "zip", "gz", "tar", "bz2", "xz", "7z", "rar", "pdf", "ttf",
+    "otf", "woff", "woff2", "eot",
+];
+
+/// Check if a file path has a binary extension.
+pub fn is_binary_extension(path: &str) -> bool {
+    let path_lower = path.to_lowercase();
+    if let Some(ext) = path_lower.rsplit('.').next() {
+        BINARY_EXTENSIONS.contains(&ext)
+    } else {
+        false
+    }
+}
+
+/// A wrapper around ReadFileTool that rejects binary file extensions before execution.
+struct BinaryGuardedReadTool {
+    inner: Box<dyn AgentTool>,
+}
+
+#[async_trait::async_trait]
+impl AgentTool for BinaryGuardedReadTool {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+    fn label(&self) -> &str {
+        self.inner.label()
+    }
+    fn description(&self) -> &str {
+        self.inner.description()
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        self.inner.parameters_schema()
+    }
+    async fn execute(
+        &self,
+        params: serde_json::Value,
+        ctx: yoagent::types::ToolContext,
+    ) -> Result<yoagent::types::ToolResult, yoagent::types::ToolError> {
+        if let Some(path) = params.get("path").and_then(|v| v.as_str()) {
+            if is_binary_extension(path) {
+                let ext = path.rsplit('.').next().unwrap_or("binary");
+                return Err(yoagent::types::ToolError::Failed(format!(
+                    "Skipped binary file ({ext}): {path}. Binary files waste tokens and produce no useful output. Use bash to inspect binary files if needed."
+                )));
+            }
+        }
+        self.inner.execute(params, ctx).await
+    }
+}
+
 /// Wrap a tool with directory restrictions if any are configured.
 fn maybe_guard(
     tool: Box<dyn AgentTool>,
@@ -565,7 +619,12 @@ pub fn build_tools(
 
     vec![
         Box::new(bash),
-        maybe_guard(Box::new(ReadFileTool::default()), dir_restrictions),
+        maybe_guard(
+            Box::new(BinaryGuardedReadTool {
+                inner: Box::new(ReadFileTool::default()),
+            }),
+            dir_restrictions,
+        ),
         write_tool,
         edit_tool,
         maybe_guard(Box::new(ListFilesTool::default()), dir_restrictions),
@@ -1725,5 +1784,22 @@ mod tests {
             "Expected at least 3 streaming updates, got {}",
             captured.len()
         );
+    }
+
+    #[test]
+    fn test_is_binary_extension() {
+        assert!(is_binary_extension("libfoo.so"));
+        assert!(is_binary_extension("module.dll"));
+        assert!(is_binary_extension("app.exe"));
+        assert!(is_binary_extension("object.o"));
+        assert!(is_binary_extension("cache.pyc"));
+        assert!(is_binary_extension("image.png"));
+        assert!(is_binary_extension("archive.zip"));
+        assert!(is_binary_extension("FILE.SO")); // case insensitive
+        assert!(!is_binary_extension("main.rs"));
+        assert!(!is_binary_extension("app.py"));
+        assert!(!is_binary_extension("config.toml"));
+        assert!(!is_binary_extension("README.md"));
+        assert!(!is_binary_extension("noextension"));
     }
 }
