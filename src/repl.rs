@@ -256,7 +256,15 @@ pub async fn run_repl(
     }
 
     // Set up rustyline editor with slash-command tab-completion
-    let mut rl = Editor::new().expect("Failed to initialize readline");
+    let mut rl = match Editor::new() {
+        Ok(editor) => editor,
+        Err(e) => {
+            eprintln!(
+                "{RED}  Failed to initialize readline: {e}. Ensure a terminal is available.{RESET}"
+            );
+            return;
+        }
+    };
     rl.set_helper(Some(YoyoHelper));
     if let Some(history_path) = history_file_path() {
         if rl.load_history(&history_path).is_err() {
@@ -460,6 +468,26 @@ pub async fn run_repl(
             }
             s if s == "/runtime-errors" || s.starts_with("/runtime-errors ") => {
                 commands::handle_runtime_errors(input);
+                continue;
+            }
+            s if s == "/project-evolve" || s.starts_with("/project-evolve ") => {
+                commands::handle_project_evolve(input);
+                continue;
+            }
+            s if s == "/project-patterns" || s.starts_with("/project-patterns ") => {
+                commands::handle_project_patterns(input);
+                continue;
+            }
+            s if s == "/project-skills" || s.starts_with("/project-skills ") => {
+                commands::handle_project_skills(input);
+                continue;
+            }
+            s if s == "/project-goals" || s.starts_with("/project-goals ") => {
+                commands::handle_project_goals(input);
+                continue;
+            }
+            s if s == "/project-feedback" || s.starts_with("/project-feedback ") => {
+                commands::handle_project_feedback(input);
                 continue;
             }
             "/test" => {

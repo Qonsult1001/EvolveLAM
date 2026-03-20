@@ -486,3 +486,175 @@ fn handle_graph_search(query: &str) {
         println!();
     }
 }
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -- /remember argument parsing --
+
+    #[test]
+    fn test_remember_empty_input_does_not_panic() {
+        // Should print usage, not panic
+        handle_remember("/remember");
+        handle_remember("/remember ");
+        handle_remember("/remember  ");
+    }
+
+    #[test]
+    fn test_remember_strips_prefix() {
+        // Verify the strip_prefix logic doesn't panic on edge cases
+        let input = "/remember this is a test note";
+        let note = input.strip_prefix("/remember").unwrap_or("").trim();
+        assert_eq!(note, "this is a test note");
+    }
+
+    #[test]
+    fn test_remember_whitespace_only() {
+        let input = "/remember   ";
+        let note = input.strip_prefix("/remember").unwrap_or("").trim();
+        assert!(note.is_empty());
+    }
+
+    // -- /forget argument parsing --
+
+    #[test]
+    fn test_forget_empty_input_does_not_panic() {
+        handle_forget("/forget");
+        handle_forget("/forget ");
+    }
+
+    #[test]
+    fn test_forget_invalid_index_does_not_panic() {
+        handle_forget("/forget abc");
+        handle_forget("/forget -1");
+        handle_forget("/forget 999999");
+    }
+
+    #[test]
+    fn test_forget_parses_valid_index() {
+        let input = "/forget 3";
+        let arg = input.strip_prefix("/forget").unwrap_or("").trim();
+        let index = arg.parse::<usize>();
+        assert_eq!(index.unwrap(), 3);
+    }
+
+    // -- /memories does not panic --
+
+    #[test]
+    fn test_memories_does_not_panic() {
+        handle_memories();
+    }
+
+    // -- /graph dispatch --
+
+    #[test]
+    fn test_graph_empty_does_not_panic() {
+        handle_graph("/graph");
+        handle_graph("/graph ");
+    }
+
+    #[test]
+    fn test_graph_unknown_subcommand_shows_help() {
+        // Should show help, not panic
+        handle_graph("/graph nonexistent");
+        handle_graph("/graph foo bar");
+    }
+
+    #[test]
+    fn test_graph_downstream_empty_does_not_panic() {
+        handle_graph("/graph downstream");
+        handle_graph("/graph downstream ");
+    }
+
+    #[test]
+    fn test_graph_downstream_nonexistent_concept() {
+        handle_graph("/graph downstream nonexistent_concept_xyz");
+    }
+
+    #[test]
+    fn test_graph_neighbors_empty_does_not_panic() {
+        handle_graph("/graph neighbors");
+        handle_graph("/graph neighbors ");
+    }
+
+    #[test]
+    fn test_graph_neighbors_nonexistent_concept() {
+        handle_graph("/graph neighbors nonexistent_concept_xyz");
+    }
+
+    #[test]
+    fn test_graph_info_does_not_panic() {
+        handle_graph("/graph info");
+    }
+
+    #[test]
+    fn test_graph_stats_does_not_panic() {
+        handle_graph("/graph stats");
+    }
+
+    #[test]
+    fn test_graph_communities_does_not_panic() {
+        handle_graph("/graph communities");
+    }
+
+    #[test]
+    fn test_graph_similar_empty_does_not_panic() {
+        handle_graph("/graph similar");
+        handle_graph("/graph similar onlyone");
+    }
+
+    #[test]
+    fn test_graph_similar_two_concepts() {
+        handle_graph("/graph similar concept_a concept_b");
+    }
+
+    #[test]
+    fn test_graph_search_empty_does_not_panic() {
+        handle_graph("/graph search");
+        handle_graph("/graph search ");
+    }
+
+    #[test]
+    fn test_graph_search_nonexistent() {
+        handle_graph("/graph search zzz_nonexistent_zzz");
+    }
+
+    #[test]
+    fn test_graph_path_empty_does_not_panic() {
+        handle_graph("/graph path");
+        handle_graph("/graph path onlyone");
+    }
+
+    #[test]
+    fn test_graph_path_two_concepts() {
+        handle_graph("/graph path concept_a concept_b");
+    }
+
+    // Note: /graph populate and /graph activate tests are omitted because
+    // they read/write real files (memory/learnings.jsonl, memory/connections.jsonl)
+    // and can be slow or cause test interference. They are tested manually.
+
+    #[test]
+    fn test_graph_activate_arg_parsing() {
+        // Test the argument parsing logic without actually writing to disk
+        let args = "concept_a concept_b semantic";
+        let parts: Vec<&str> = args.splitn(3, char::is_whitespace).collect();
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[0], "concept_a");
+        assert_eq!(parts[1], "concept_b");
+        assert_eq!(parts[2], "semantic");
+
+        // Verify kind parsing
+        assert!(crate::memory::parse_connection_kind("semantic").is_some());
+        assert!(crate::memory::parse_connection_kind("causal").is_some());
+        assert!(crate::memory::parse_connection_kind("temporal").is_some());
+        assert!(crate::memory::parse_connection_kind("mathematical").is_some());
+        assert!(crate::memory::parse_connection_kind("scientific").is_some());
+        assert!(crate::memory::parse_connection_kind("invalid").is_none());
+    }
+}
