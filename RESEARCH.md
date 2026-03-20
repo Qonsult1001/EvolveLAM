@@ -291,3 +291,26 @@ Goal: The streaming chat endpoint sends SSE chunks as fast as the agent produces
 If the client is slow (network latency, heavy rendering), chunks queue in the TCP buffer
 with no backpressure. Study how production SSE servers handle slow consumers — buffering
 strategies, connection timeout, and whether HTTP/2 server push would be better.
+
+## Brain & Self-Evolution
+
+### [ ] Protected file override for creator-directed changes
+Goal: The verify-task gate in evolve-ide.sh reverts ALL changes when it detects
+a protected core skill was modified — even when the change is creator-directed.
+This caused a catastrophic loss of work on Day 20. Need a mechanism to bypass
+the protection for explicit creator overrides (e.g., an environment variable
+like EVOLVE_ALLOW_PROTECTED=1) while keeping the safety gate for autonomous runs.
+
+### [ ] How other coding agents handle knowledge persistence
+URLs:
+- https://github.com/paul-gauthier/aider
+- https://github.com/Pythagora-io/gpt-pilot
+Goal: Study how aider, gpt-pilot, and similar agents persist knowledge across
+sessions. What do they remember? How do they structure it? What works, what
+doesn't? Apply insights to the domain skill and connection graph architecture.
+
+### [ ] MCP server discovery and auto-connection
+Goal: The evolve skill says to discover and plug in MCP servers autonomously.
+Study the MCP ecosystem — what servers exist, how to discover them, how to
+evaluate which ones would expand coding capabilities. Build a discovery
+workflow that the agent can run during the RESEARCH phase of evolution.
