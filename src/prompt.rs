@@ -14,31 +14,76 @@ const MAX_RETRIES: u32 = 3;
 /// Append a runtime error to `.yoyo/runtime_errors.jsonl`.
 /// Categories: "tool_failure", "api_error", "stream_error", "input_rejected"
 ///
-/// Deduplicates: skips if the last logged entry has the same category+message
-/// and was logged within 2 seconds (prevents retry-storm log bloat).
+/// Deduplicates with escalating throttle: same category+message within a window
+/// is suppressed. Window starts at 2s and escalates: after 3 occurrences → 30s,
+/// after 10 → 300s. When suppressed errors are finally logged, a `"count"` field
+/// records how many were suppressed since the last log.
 pub fn append_runtime_error(category: &str, message: &str, tool_name: Option<&str>) {
+    use std::sync::Mutex;
+    use std::time::SystemTime;
+
+    // Session-scoped throttle state: (category+message) → (occurrence_count, suppressed_count, last_logged_epoch)
+    type ThrottleState = HashMap<String, (u32, u32, u64)>;
+    static THROTTLE: std::sync::LazyLock<Mutex<ThrottleState>> =
+        std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
     let ts = chrono_now_iso();
+    let safe_msg = message.replace('"', "\\\"").replace('\n', " ");
+    let throttle_key = format!("{}:{}", category, &safe_msg);
+
+    let now_epoch = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    // Check throttle: escalating dedup window
+    let (should_log, suppressed_count) = if let Ok(mut state) = THROTTLE.lock() {
+        let entry = state.entry(throttle_key.clone()).or_insert((0, 0, 0));
+        entry.0 += 1; // increment occurrence count
+        let occurrences = entry.0;
+
+        let window_secs: u64 = if occurrences > 10 {
+            300 // 5 minutes after 10+ occurrences
+        } else if occurrences > 3 {
+            30 // 30 seconds after 3+ occurrences
+        } else {
+            2 // default 2-second dedup
+        };
+
+        let elapsed = now_epoch.saturating_sub(entry.2);
+        if elapsed < window_secs {
+            entry.1 += 1; // count suppressed
+            (false, 0)
+        } else {
+            let suppressed = entry.1;
+            entry.1 = 0; // reset suppressed count
+            entry.2 = now_epoch; // update last logged time
+            (true, suppressed)
+        }
+    } else {
+        (true, 0) // mutex poisoned — log anyway
+    };
+
+    if !should_log {
+        return;
+    }
+
     let tool_json = match tool_name {
         Some(t) => format!(",\"tool\":\"{}\"", t.replace('"', "\\\"")),
         None => String::new(),
     };
-    let safe_msg = message.replace('"', "\\\"").replace('\n', " ");
+    let count_json = if suppressed_count > 0 {
+        format!(",\"suppressed\":{suppressed_count}")
+    } else {
+        String::new()
+    };
     let line = format!(
-        "{{\"ts\":\"{ts}\",\"category\":\"{category}\"{tool_json},\"message\":\"{safe_msg}\"}}"
+        "{{\"ts\":\"{ts}\",\"category\":\"{category}\"{tool_json},\"message\":\"{safe_msg}\"{count_json}}}"
     );
 
     let state_dir = crate::cli::yoyo_state_dir();
     let log_path = state_dir.join("runtime_errors.jsonl");
     let _ = std::fs::create_dir_all(&state_dir);
-
-    // Deduplicate: check if last line has the same category+message
-    if let Ok(existing) = std::fs::read_to_string(&log_path) {
-        if let Some(last_line) = existing.lines().rev().find(|l| !l.trim().is_empty()) {
-            if is_duplicate_runtime_entry(last_line, category, &safe_msg, &ts) {
-                return;
-            }
-        }
-    }
 
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
@@ -50,6 +95,8 @@ pub fn append_runtime_error(category: &str, message: &str, tool_name: Option<&st
 }
 
 /// Check if a JSONL line is a duplicate of the current error (same category+message, within 2s).
+/// Superseded by in-memory throttle in append_runtime_error, but kept for test coverage.
+#[cfg(test)]
 pub fn is_duplicate_runtime_entry(
     last_line: &str,
     category: &str,
