@@ -572,6 +572,10 @@ phase_verify_task() {
     REVERT_REASON=""
 
     # Check 1: Protected files (committed + staged + unstaged)
+    # EVOLVE_ALLOW_PROTECTED=1 bypasses this gate for creator-directed changes
+    if [ "${EVOLVE_ALLOW_PROTECTED:-0}" = "1" ]; then
+        echo "  ⚠ EVOLVE_ALLOW_PROTECTED=1 — skipping protected file check"
+    else
     PROTECTED_CHANGES=""
     if ! PROTECTED_CHANGES=$(git diff --name-only "$PRE_TASK_SHA"..HEAD -- \
         .github/workflows/ PERSONALITY.md IDENTITY.md \
@@ -610,6 +614,7 @@ phase_verify_task() {
         TASK_OK=false
         REVERT_REASON="Modified protected files: $PROTECTED_CHANGES"
     fi
+    fi # end EVOLVE_ALLOW_PROTECTED check
 
     # Check 2: Build + tests (with retry — write fix prompt on first failure)
     if [ "$TASK_OK" = true ]; then
