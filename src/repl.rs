@@ -576,6 +576,10 @@ pub async fn run_repl(
                 crate::commands_memory::handle_forget(input);
                 continue;
             }
+            s if s == "/brain" || s.starts_with("/brain ") => {
+                crate::commands_memory::handle_brain(input);
+                continue;
+            }
             "/index" => {
                 commands::handle_index();
                 continue;

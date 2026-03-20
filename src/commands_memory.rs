@@ -487,6 +487,255 @@ fn handle_graph_search(query: &str) {
     }
 }
 
+// ── /brain ────────────────────────────────────────────────────────────────
+
+/// Handle /brain subcommands — query and grow the knowledge system.
+pub fn handle_brain(input: &str) {
+    let rest = input.strip_prefix("/brain").unwrap_or("").trim();
+    if rest.is_empty() || rest == "status" {
+        handle_brain_status();
+    } else if rest == "gaps" {
+        handle_brain_gaps();
+    } else if let Some(args) = rest.strip_prefix("learn") {
+        handle_brain_learn(args.trim());
+    } else {
+        println!("{DIM}  usage: /brain status    Show knowledge system health");
+        println!("         /brain gaps      Identify domains with fewest learned patterns");
+        println!(
+            "         /brain learn <domain> <pattern>   Add a pattern to a domain skill{RESET}\n"
+        );
+    }
+}
+
+fn handle_brain_status() {
+    println!("\n{BOLD}  Brain Status{RESET}\n");
+
+    // Check domain skills and count patterns in each
+    let skills_dir = std::path::Path::new("skills");
+    let domains = [
+        "code-rust",
+        "code-web",
+        "code-systems",
+        "code-data",
+        "code-devops",
+        "code-testing",
+    ];
+
+    let mut total_patterns = 0usize;
+    for domain in &domains {
+        let path = skills_dir.join(domain).join("SKILL.md");
+        let pattern_count = if let Ok(content) = std::fs::read_to_string(&path) {
+            // Count lines after "## Patterns Learned" that start with "- "
+            let mut counting = false;
+            let mut count = 0usize;
+            for line in content.lines() {
+                if line.contains("Patterns Learned") {
+                    counting = true;
+                    continue;
+                }
+                if counting && line.starts_with("## ") {
+                    break;
+                }
+                if counting && line.starts_with("- ") {
+                    count += 1;
+                }
+            }
+            count
+        } else {
+            0
+        };
+        total_patterns += pattern_count;
+        let status = if pattern_count == 0 {
+            format!("{DIM}empty{RESET}")
+        } else {
+            format!("{GREEN}{pattern_count} patterns{RESET}")
+        };
+        println!("  {domain}: {status}");
+    }
+
+    // Connection graph health
+    let conn_path = std::path::Path::new("memory/connections.jsonl");
+    let conn_count = if let Ok(content) = std::fs::read_to_string(conn_path) {
+        content.lines().filter(|l| !l.trim().is_empty()).count()
+    } else {
+        0
+    };
+
+    // Learnings count
+    let learn_path = std::path::Path::new("memory/learnings.jsonl");
+    let learn_count = if let Ok(content) = std::fs::read_to_string(learn_path) {
+        content.lines().filter(|l| !l.trim().is_empty()).count()
+    } else {
+        0
+    };
+
+    // Brain skill exists?
+    let brain_exists = skills_dir.join("brain").join("SKILL.md").exists();
+
+    println!();
+    println!("  Connection graph: {conn_count} edges");
+    println!("  Learnings archive: {learn_count} entries");
+    println!("  Domain patterns: {total_patterns} total");
+    println!(
+        "  Brain skill: {}",
+        if brain_exists {
+            format!("{GREEN}present{RESET}")
+        } else {
+            format!("{RED}missing{RESET}")
+        }
+    );
+    println!();
+}
+
+fn handle_brain_gaps() {
+    println!("\n{BOLD}  Knowledge Gaps{RESET}\n");
+
+    let skills_dir = std::path::Path::new("skills");
+    let domains = [
+        ("code-rust", "Rust patterns"),
+        ("code-web", "Web development"),
+        ("code-systems", "Systems programming"),
+        ("code-data", "Data & databases"),
+        ("code-devops", "DevOps & deployment"),
+        ("code-testing", "Testing strategies"),
+    ];
+
+    let mut gaps: Vec<(&str, &str, usize)> = Vec::new();
+    for (domain, desc) in &domains {
+        let path = skills_dir.join(domain).join("SKILL.md");
+        let pattern_count = if let Ok(content) = std::fs::read_to_string(&path) {
+            let mut counting = false;
+            let mut count = 0usize;
+            for line in content.lines() {
+                if line.contains("Patterns Learned") {
+                    counting = true;
+                    continue;
+                }
+                if counting && line.starts_with("## ") {
+                    break;
+                }
+                if counting && line.starts_with("- ") {
+                    count += 1;
+                }
+            }
+            count
+        } else {
+            0
+        };
+        gaps.push((domain, desc, pattern_count));
+    }
+
+    // Sort by fewest patterns first
+    gaps.sort_by_key(|(_, _, count)| *count);
+
+    for (domain, desc, count) in &gaps {
+        let indicator = if *count == 0 {
+            format!("{RED}⚠ EMPTY{RESET}")
+        } else if *count < 3 {
+            format!("{YELLOW}sparse ({count}){RESET}")
+        } else {
+            format!("{GREEN}growing ({count}){RESET}")
+        };
+        println!("  {domain} ({desc}): {indicator}");
+    }
+
+    println!("\n{DIM}  Use /brain learn <domain> <pattern> to add patterns.");
+    println!("  Use /research <topic> to study a domain before adding patterns.{RESET}\n");
+}
+
+fn handle_brain_learn(args: &str) {
+    if args.is_empty() {
+        println!(
+            "{DIM}  usage: /brain learn <domain> <pattern description>\n\n\
+             Domains: code-rust, code-web, code-systems, code-data, code-devops, code-testing\n\n\
+             Example: /brain learn code-rust use Cow<str> for functions that sometimes need to allocate{RESET}\n"
+        );
+        return;
+    }
+
+    let parts: Vec<&str> = args.splitn(2, ' ').collect();
+    if parts.len() < 2 {
+        println!("{DIM}  Need both domain and pattern. Example:");
+        println!(
+            "  /brain learn code-rust prefer &str over String in function parameters{RESET}\n"
+        );
+        return;
+    }
+
+    let domain = parts[0];
+    let pattern = parts[1].trim();
+    let valid_domains = [
+        "code-rust",
+        "code-web",
+        "code-systems",
+        "code-data",
+        "code-devops",
+        "code-testing",
+    ];
+
+    if !valid_domains.contains(&domain) {
+        println!("{DIM}  Unknown domain: {domain}");
+        println!("  Valid domains: {}", valid_domains.join(", "));
+        println!("{RESET}");
+        return;
+    }
+
+    let skill_path = format!("skills/{domain}/SKILL.md");
+    let path = std::path::Path::new(&skill_path);
+
+    if !path.exists() {
+        println!("{DIM}  Skill file not found: {skill_path}{RESET}\n");
+        return;
+    }
+
+    // Read the file and append the pattern after "## Patterns Learned"
+    if let Ok(content) = std::fs::read_to_string(path) {
+        let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+        let mut inserted = false;
+
+        // Find "Patterns Learned" section and insert before the next section or at end
+        for i in 0..lines.len() {
+            if lines[i].contains("Patterns Learned") {
+                // Skip the placeholder text if present
+                let mut insert_at = i + 1;
+                while insert_at < lines.len() {
+                    let trimmed = lines[insert_at].trim();
+                    if trimmed.starts_with("## ") {
+                        break;
+                    }
+                    if trimmed.starts_with("*(") {
+                        // Skip placeholder like "*(This section grows...)*"
+                        insert_at += 1;
+                        continue;
+                    }
+                    insert_at += 1;
+                }
+                // Insert before the next section header or at insert_at
+                lines.insert(insert_at, format!("- {pattern}"));
+                inserted = true;
+                break;
+            }
+        }
+
+        if !inserted {
+            // No "Patterns Learned" section found — append at end
+            lines.push(String::new());
+            lines.push("## Patterns Learned".to_string());
+            lines.push(String::new());
+            lines.push(format!("- {pattern}"));
+        }
+
+        let new_content = lines.join("\n");
+        if std::fs::write(path, &new_content).is_ok() {
+            println!("{GREEN}  Added pattern to {domain}: {pattern}{RESET}\n");
+        } else {
+            println!("{RED}  Failed to write to {skill_path}{RESET}\n");
+        }
+    } else {
+        println!("{DIM}  Could not read {skill_path}{RESET}\n");
+    }
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
