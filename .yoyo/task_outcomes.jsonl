@@ -18,3 +18,4 @@
 {"day": 19, "task_num": 3, "title": "Serve mode conversation isolation", "outcome": "verified"}
 {"day": 19, "task_num": 4, "title": "Wire /init to read actual file contents for external projects", "outcome": "verified"}
 {"day": 19, "task_num": 5, "title": "Improve runtime error handling for connection failures", "outcome": "verified"}
+{"day": 20, "task_num": 1, "title": "Fix panic in feedback.rs \u2014 replace with proper error handling", "outcome": "reverted"}

@@ -65,3 +65,5 @@
 {"ts":"2026-03-19T20:42:43Z","category":"api_error","message":"error sending request for url (http://localhost:11434/v1/chat/completions)"}
 {"ts":"2026-03-19T20:43:08Z","category":"api_error","message":"error sending request for url (http://localhost:11434/v1/chat/completions)"}
 {"ts":"2026-03-19T20:45:09Z","category":"api_error","message":"error sending request for url (http://localhost:11434/v1/chat/completions)"}
+{"ts":"2026-03-20T13:15:09Z","category":"api_error","message":"error sending request for url (http://localhost:11434/v1/chat/completions)"}
+{"ts":"2026-03-20T13:17:59Z","category":"api_error","message":"error sending request for url (http://localhost:11434/v1/chat/completions)"}
