@@ -19,3 +19,8 @@
 {"day": 19, "task_num": 4, "title": "Wire /init to read actual file contents for external projects", "outcome": "verified"}
 {"day": 19, "task_num": 5, "title": "Improve runtime error handling for connection failures", "outcome": "verified"}
 {"day": 20, "task_num": 1, "title": "Fix panic in feedback.rs \u2014 replace with proper error handling", "outcome": "reverted"}
+{"day": 20, "task_num": 1, "title": "Add EVOLVE_ALLOW_PROTECTED bypass to evolve-ide.sh verify-task", "outcome": "verified"}
+{"day": 20, "task_num": 2, "title": "Add runtime error auto-throttling \u2014 suppress repeated identical errors", "outcome": "verified"}
+{"day": 20, "task_num": 3, "title": "Add /refactor command for coordinated multi-file changes", "outcome": "verified"}
+{"day": 20, "task_num": 4, "title": "Implement /research command for in-REPL web research", "outcome": "verified"}
+{"day": 20, "task_num": 5, "title": "Add /brain command \u2014 query and grow the knowledge system", "outcome": "verified"}
