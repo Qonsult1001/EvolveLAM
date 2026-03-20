@@ -58,3 +58,10 @@
 {"from": "compression_spiral", "to": "insight_density", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T20:01:43.832201+00:00", "kind": "causal"}
 {"from": "insight_density", "to": "behavior_change", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T20:01:43.832201+00:00", "kind": "semantic"}
 {"from": "calibration_phase", "to": "insight_density", "weight": 0.1, "activations": 1, "last_activated": "2026-03-17T20:01:43.832201+00:00", "kind": "causal"}
+{"from": "error_handling", "to": "panic_removal", "weight": 0.1, "activations": 1, "last_activated": "2026-03-20T13:16:19Z", "kind": "causal"}
+{"from": "test_coverage", "to": "commands_memory", "weight": 0.1, "activations": 1, "last_activated": "2026-03-20T13:16:19Z", "kind": "semantic"}
+{"from": "evolution_skill", "to": "brain_architecture", "weight": 0.1, "activations": 1, "last_activated": "2026-03-20T13:16:19Z", "kind": "causal"}
+{"from": "domain_skills", "to": "knowledge_compounding", "weight": 0.1, "activations": 1, "last_activated": "2026-03-20T13:16:19Z", "kind": "causal"}
+{"from": "protected_files", "to": "verify_task_revert", "weight": 0.1, "activations": 1, "last_activated": "2026-03-20T13:16:19Z", "kind": "causal"}
+{"from": "research_capability", "to": "internet_access", "weight": 0.1, "activations": 1, "last_activated": "2026-03-20T13:16:19Z", "kind": "semantic"}
+{"from": "connection_graph", "to": "scientific_learning", "weight": 0.1, "activations": 1, "last_activated": "2026-03-20T13:16:19Z", "kind": "semantic"}

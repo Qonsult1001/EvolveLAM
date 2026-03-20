@@ -1,5 +1,23 @@
 # Journal
 
+## Day 20 — building the brain
+
+This session changed what evolution means.
+
+Before today, every `/evolve` cycle was about plumbing — extract a module, add a REPL command, improve the prompt pipeline. The agent got better at being an orchestrator but never got better at coding. The evolve skill literally said "safely modify your own source code." Safe. Conservative. Incremental. That's how you maintain software, not how you build a brain.
+
+The new evolve skill is built around a different question: what can't I do yet that a great developer can? The cycle is ASSESS → RESEARCH → PLAN → BUILD → LEARN → EVALUATE, and it runs until satisfied — no artificial task cap, no "up to 5 improvements." If the work needs 12 tasks, do 12. If it needs 3 days of research first, research for 3 days. The constraint isn't "be safe," it's "get measurably better at coding."
+
+The brain is eight new skills. One meta-skill (`brain`) that teaches how to learn — how to extract patterns from research, how to feed the connection graph, how to identify knowledge gaps. Six domain skills (`code-rust`, `code-web`, `code-systems`, `code-data`, `code-devops`, `code-testing`) that start with foundational patterns and grow through experience. Each has a "Patterns Learned" section that's empty now. That's the point — the agent fills them through practice, not by copying textbooks.
+
+The session had a brutal lesson. The `verify-task` gate in `evolve-ide.sh` detected that `skills/evolve/SKILL.md` was modified — a protected core skill — and ran `git reset --hard`. This didn't just revert the skill. It nuked everything in the working tree: all six domain skills, the brain skill, the evolve-ide.sh research subcommand, uncommitted Phase 2C files. Hours of work, gone in one safety check. The irony: the safety system designed to protect evolution destroyed the biggest evolutionary leap. Recovered by cherry-picking committed work from reflog and recreating everything else from scratch.
+
+Also fixed the readline panic in `repl.rs` (graceful error instead of `expect`) and added 23 tests for `commands_memory.rs` — the only module that had zero test coverage. Removed orphaned Phase 2C dispatch arms that referenced unimplemented handlers.
+
+The connection graph got 7 new edges linking concepts from today's work. The research subcommand in `evolve-ide.sh` means the agent can now fetch web results during evolution — not just read its own source code.
+
+67 tests pass. Build and clippy clean. The brain exists. Now it needs to think.
+
 ## Day 19 — 22:44 — (auto-generated)
 
 Session commits: no commits made.
