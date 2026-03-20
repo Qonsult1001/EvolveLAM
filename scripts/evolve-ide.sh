@@ -1166,10 +1166,10 @@ case "${1:-help}" in
 AUTONOMOUS EVOLUTION — FOLLOW THESE INSTRUCTIONS NOW. DO NOT STOP.
 =========================================================================
 
-Setup is complete. You MUST now execute Steps 1-8 below autonomously.
+Setup is complete. You MUST now execute Steps 1-9 below autonomously.
 Do not ask the user for permission. Do not stop to summarize. Just do it.
 
---- STEP 1: READ YOUR OWN SOURCE CODE ---
+--- STEP 1: ASSESS — READ CODE + CHECK BRAIN HEALTH ---
 
 Read and understand your current state. Read these files NOW:
 - ALL files under src/ (your source code)
@@ -1180,7 +1180,12 @@ Read and understand your current state. Read these files NOW:
 - memory/active_learnings.md if it exists (your accumulated wisdom)
 - skills/plan/SKILL.md (planning framework — use its prioritization)
 
-Note friction, bugs, gaps, and opportunities as you read.
+Then run these commands to assess your brain:
+  /brain gaps          — which domains have the fewest learned patterns?
+  /brain status        — overall knowledge system health
+  /runtime-errors patterns  — what's breaking in real usage?
+
+Note friction, bugs, gaps, and opportunities. Use assessment to inform the plan.
 
 --- STEP 2: CREATE THE SESSION PLAN ---
 
@@ -1214,7 +1219,26 @@ For each task in SESSION_PLAN.md, run this loop:
      - REVERTED → task failed, it was auto-reverted and an issue was filed. Move on.
   e. Go back to (a)
 
---- STEP 4: FINISH — ISSUE RESPONSES, JOURNAL, TAG, PUSH ---
+--- STEP 4: GROW THE BRAIN — AUTOMATIC KNOWLEDGE EXTRACTION ---
+
+This step is MANDATORY. After implementing tasks, extract what you learned:
+
+a. For every coding pattern you used or discovered during this session:
+   /brain learn code-rust <pattern>
+   /brain learn code-web <pattern>
+   /brain learn code-testing <pattern>
+   (use the appropriate domain: code-rust, code-web, code-systems, code-data, code-devops, code-testing)
+
+b. Connect new concepts in the graph (python3 json.dumps to memory/connections.jsonl)
+
+c. Run /brain status — verify the domain skills are growing, not stagnant.
+   If all domains are still empty, you missed this step. Go back and add patterns.
+
+d. If you discovered a research gap, append a ### [ ] entry to RESEARCH.md
+
+Commit: git add skills/ memory/ RESEARCH.md && git commit -m "Day N (HH:MM): brain growth"
+
+--- STEP 5: FINISH — ISSUE RESPONSES, JOURNAL, TAG, PUSH ---
 
 Run: ./scripts/evolve-ide.sh finish
 
@@ -1229,29 +1253,30 @@ This will:
 If finish reports build errors and writes .evolve/fix_prompt.md:
   → Read .evolve/fix_prompt.md, fix the errors, re-run: ./scripts/evolve-ide.sh finish
 
---- STEP 5: JOURNAL ENTRY ---
+--- STEP 6: JOURNAL ENTRY ---
 
 If .evolve/journal_prompt.md exists after finish, read it and write a journal entry.
 Match the voice in existing JOURNAL.md entries. Prepend at top.
 Commit: git add JOURNAL.md && git commit -m "Day N (HH:MM): journal entry"
 
---- STEP 6: REFLECTION & LEARNINGS ---
+--- STEP 7: REFLECTION & LEARNINGS ---
 
 If .evolve/reflect_prompt.md exists, read it. If genuinely novel insight
 (not code patterns — about yourself, your process, your growth), append one
 JSONL line to memory/learnings.jsonl via python3 json.dumps(). Otherwise skip.
 
---- STEP 7: UPDATE GAP ANALYSIS ---
+--- STEP 8: UPDATE GAP ANALYSIS ---
 
 If .evolve/gap_prompt.md exists, read it and update CLAUDE_CODE_GAP.md based
 on what you built this session. Only update features you actually implemented.
 Commit: git add CLAUDE_CODE_GAP.md && git commit -m "Day N (HH:MM): update gap analysis"
 
---- STEP 8: DONE ---
+--- STEP 9: DONE ---
 
 Report what was accomplished:
 - How many tasks completed vs reverted
 - Which issues addressed and how (implemented/wontfix/partial/reply)
+- Brain growth: how many patterns added to domain skills
 - Any insights from this session
 
 =========================================================================

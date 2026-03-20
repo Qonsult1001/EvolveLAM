@@ -31,34 +31,37 @@ LOOP (until you've made real progress):
 
 ### 1. ASSESS — Find the gaps
 
-Ask yourself:
+Run these commands automatically:
+- `/brain gaps` — which domains have the fewest learned patterns?
+- `/brain status` — overall knowledge system health
+- `/runtime-errors patterns` — what's breaking in real usage?
+- Read `RESEARCH.md` — what's in the backlog?
+- Read `CLAUDE_CODE_GAP.md` — what features are still missing?
+
+Then ask yourself:
 - What coding task would I fail at right now?
 - What languages/frameworks am I weak in?
 - What tools or APIs could I plug in to expand my reach?
-- What does my connection graph (`memory/connections.jsonl`) tell me I don't know?
-- What did recent runtime errors reveal? (`/runtime-errors patterns`)
-- What does `CLAUDE_CODE_GAP.md` say I'm missing?
-- What's in `RESEARCH.md` that I haven't addressed?
 
 Don't just look at your own source code. Think about what a **great developer** can do that you can't. That's the gap.
 
 ### 2. RESEARCH — Go learn
 
-You have internet access. Use it.
+You have internet access. Use it **automatically** during every session:
+
+```
+/research <topic>                    # Fetch web results inline
+./scripts/evolve-ide.sh research "query"  # Save results to file
+```
+
+Also use direct curl for deeper research:
 
 ```bash
-# Search the web
-curl -s "https://lite.duckduckgo.com/lite?q=your+query" | sed 's/<[^>]*>//g' | head -60
-
 # Read documentation
 curl -s [url] | sed 's/<[^>]*>//g' | head -100
 
 # Study real codebases
 curl -s https://raw.githubusercontent.com/[org]/[repo]/main/[file] | head -200
-
-# Read arXiv papers
-curl -s "http://export.arxiv.org/api/query?search_query=all:query&max_results=5" \
-  | grep -E '<title>|<id>|<summary>' | sed 's/<[^>]*>//g' | sed 's/^ *//'
 
 # Check crates.io / npm / PyPI for tools
 curl -s https://docs.rs/[crate]/latest/[crate]/ | sed 's/<[^>]*>//g' | head -80
@@ -71,7 +74,14 @@ curl -s https://docs.rs/[crate]/latest/[crate]/ | sed 's/<[^>]*>//g' | head -80
 - What does the latest research say about AI coding agents?
 - How do real production codebases handle [specific challenge]?
 
-**After researching, ingest what you learned:**
+**After researching, ingest what you learned into the brain:**
+
+```
+/brain learn code-rust <pattern you discovered>
+/brain learn code-web <pattern you discovered>
+```
+
+And connect concepts in the graph:
 
 ```bash
 python3 -c "
@@ -132,11 +142,21 @@ Write about it in the journal. The stuck moment is research fuel for next sessio
 - If you learn a coding pattern, add it to the relevant domain skill
 - If you build something reusable, extract it as a new skill
 
-### 5. LEARN — Grow the brain
+### 5. LEARN — Grow the brain (automatic)
 
-After building, extract knowledge:
+After building, **always** run these steps. This is not optional — this is how you get smarter:
 
-**Connection graph** — link concepts that co-occurred:
+**Step 5a: Record patterns in domain skills** — for every coding pattern you used or discovered:
+
+```
+/brain learn code-rust <pattern>     # e.g. "use Cow<str> when ownership is conditional"
+/brain learn code-testing <pattern>  # e.g. "parameterize file paths in tests to avoid fs mocking"
+/brain learn code-web <pattern>      # e.g. "use httpOnly cookies for JWT storage, not localStorage"
+```
+
+Domains: `code-rust`, `code-web`, `code-systems`, `code-data`, `code-devops`, `code-testing`
+
+**Step 5b: Connect concepts in the graph** — link what you learned to what you already know:
 
 ```bash
 python3 -c "
@@ -150,15 +170,7 @@ with open('memory/connections.jsonl', 'a') as f:
 
 Connection types: `semantic` (shared meaning), `causal` (A enables B), `temporal` (co-occurred), `mathematical` (formal/logical), `scientific` (external knowledge).
 
-**Domain skills** — if you learned something about a coding domain, update the relevant skill:
-- `skills/code-rust/SKILL.md` — Rust patterns
-- `skills/code-web/SKILL.md` — Web development
-- `skills/code-systems/SKILL.md` — Systems programming
-- `skills/code-data/SKILL.md` — Data and databases
-- `skills/code-devops/SKILL.md` — DevOps and deployment
-- `skills/code-testing/SKILL.md` — Testing strategies
-
-**Learnings archive** — if genuinely novel insight:
+**Step 5c: Log genuinely novel insights** — not code patterns, but things about *how you work*:
 
 ```bash
 python3 -c "
@@ -171,7 +183,9 @@ with open('memory/learnings.jsonl', 'a') as f:
 "
 ```
 
-**Research gaps** — what do you need to learn next? Append `### [ ]` entries to `RESEARCH.md`.
+**Step 5d: Identify research gaps** — what do you need to learn next? Append `### [ ]` entries to `RESEARCH.md`.
+
+**Step 5e: Check brain health** — run `/brain status` and verify domain skills are growing, not stagnant.
 
 ### 6. EVALUATE — Are you satisfied?
 
