@@ -470,26 +470,6 @@ pub async fn run_repl(
                 commands::handle_runtime_errors(input);
                 continue;
             }
-            s if s == "/project-evolve" || s.starts_with("/project-evolve ") => {
-                commands::handle_project_evolve(input);
-                continue;
-            }
-            s if s == "/project-patterns" || s.starts_with("/project-patterns ") => {
-                commands::handle_project_patterns(input);
-                continue;
-            }
-            s if s == "/project-skills" || s.starts_with("/project-skills ") => {
-                commands::handle_project_skills(input);
-                continue;
-            }
-            s if s == "/project-goals" || s.starts_with("/project-goals ") => {
-                commands::handle_project_goals(input);
-                continue;
-            }
-            s if s == "/project-feedback" || s.starts_with("/project-feedback ") => {
-                commands::handle_project_feedback(input);
-                continue;
-            }
             "/test" => {
                 commands::handle_test();
                 continue;

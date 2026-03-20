@@ -1127,6 +1127,27 @@ case "${1:-help}" in
     finish)
         phase_finish
         ;;
+    research)
+        # Fetch web results for a research query
+        QUERY="${2:-}"
+        if [ -z "$QUERY" ]; then
+            echo "Usage: ./scripts/evolve-ide.sh research \"your search query\""
+            echo "Results saved to .evolve/research_results.md"
+            exit 1
+        fi
+        mkdir -p "$EVOLVE_DIR"
+        ENCODED=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$QUERY'))")
+        echo "# Research: $QUERY" > "$EVOLVE_DIR/research_results.md"
+        echo "" >> "$EVOLVE_DIR/research_results.md"
+        echo "## Web Results" >> "$EVOLVE_DIR/research_results.md"
+        echo "" >> "$EVOLVE_DIR/research_results.md"
+        curl -s "https://lite.duckduckgo.com/lite?q=$ENCODED" \
+            | sed 's/<[^>]*>//g' | sed '/^$/d' | head -80 \
+            >> "$EVOLVE_DIR/research_results.md" 2>/dev/null || echo "(fetch failed)" >> "$EVOLVE_DIR/research_results.md"
+        echo ""
+        echo "Research results saved to .evolve/research_results.md"
+        echo "Read the file and incorporate findings into your plan."
+        ;;
     all)
         # Run setup (build check, CI, issues) then output the full runbook
         # directly to stdout so the IDE agent acts on it immediately.
@@ -1244,6 +1265,7 @@ RUNBOOK_REST
         echo "               Writes task prompt to .evolve/task_prompt.md"
         echo "  verify-task  Run verification gate on the current task."
         echo "  finish       Final build check, journal, issue responses, push."
+        echo "  research     Fetch web results for a query → .evolve/research_results.md"
         echo "  all          Run setup + output full runbook for autonomous execution."
         echo ""
         echo "Workflow:"
