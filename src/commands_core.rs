@@ -69,6 +69,7 @@ pub const KNOWN_COMMANDS: &[&str] = &[
     "/changelog",
     "/blame",
     "/runtime-errors",
+    "/refactor",
 ];
 
 /// Well-known model names for `/model <Tab>` completion.

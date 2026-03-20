@@ -3336,6 +3336,90 @@ fn handle_coupling_for_dir(_input: &str, src_dir: &std::path::Path, query: &str)
     }
 }
 
+// ── /refactor ─────────────────────────────────────────────────────────────
+
+/// Build a coordinated multi-file refactoring prompt.
+/// Returns a prompt string for the agent to execute, or None if no valid query.
+pub fn handle_refactor(input: &str) -> Option<String> {
+    let description = input.strip_prefix("/refactor").unwrap_or("").trim();
+    if description.is_empty() {
+        println!(
+            "{DIM}  Usage: /refactor <description of what to change>\n\n\
+             Examples:\n\
+             /refactor rename handle_graph to handle_graph_command\n\
+             /refactor extract error handling from repl.rs into a new module\n\
+             /refactor make all handle_* functions return Result\n\n\
+             This command analyzes file coupling, reads affected source files,\n\
+             and sends a coordinated refactoring prompt to the AI agent.{RESET}\n"
+        );
+        return None;
+    }
+
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let src_dir = if cwd.join("src").is_dir() {
+        cwd.join("src")
+    } else {
+        cwd.clone()
+    };
+
+    println!("{DIM}  Analyzing file coupling for refactoring...{RESET}");
+
+    // Get coupling data
+    let couplings = ast::detect_file_couplings(&src_dir);
+    let coupling_summary = ast::format_couplings(&couplings);
+
+    // Get function-level cross-references
+    let func_refs = ast::detect_function_refs(&src_dir);
+    let func_summary = ast::format_function_refs(&func_refs);
+
+    // Read all source files (up to a reasonable limit)
+    let mut file_contents = String::new();
+    let mut file_count = 0;
+    if let Ok(entries) = std::fs::read_dir(&src_dir) {
+        let mut paths: Vec<_> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "rs"))
+            .collect();
+        paths.sort();
+        for path in &paths {
+            if let Ok(content) = std::fs::read_to_string(path) {
+                let name = path.file_name().unwrap_or_default().to_string_lossy();
+                // Include first 200 lines of each file for context (full files would blow context)
+                let preview: String = content.lines().take(200).collect::<Vec<_>>().join("\n");
+                let total_lines = content.lines().count();
+                file_contents.push_str(&format!(
+                    "\n--- {name} ({total_lines} lines, showing first 200) ---\n{preview}\n"
+                ));
+                file_count += 1;
+            }
+        }
+    }
+
+    println!("{DIM}  Found {file_count} source files. Building refactoring prompt...{RESET}\n");
+
+    let prompt = format!(
+        "I need you to perform a coordinated multi-file refactoring:\n\n\
+         ## Refactoring Request\n{description}\n\n\
+         ## File Coupling Analysis\n\
+         These files depend on each other — changes to one may require changes to others:\n\
+         ```\n{coupling_summary}\n```\n\n\
+         ## Function Cross-References\n\
+         These functions are referenced across files:\n\
+         ```\n{func_summary}\n```\n\n\
+         ## Source Files\n{file_contents}\n\n\
+         ## Instructions\n\
+         1. Identify ALL files that need to change for this refactoring\n\
+         2. Plan the changes in dependency order (imports/types first, then callers)\n\
+         3. Make all changes using edit_file — surgical edits, not full rewrites\n\
+         4. After all edits, run: cargo fmt && cargo clippy --all-targets -- -D warnings && cargo build && cargo test\n\
+         5. Fix any errors before declaring done\n\
+         \nThis is a coordinated refactoring — every affected file must be updated together."
+    );
+
+    Some(prompt)
+}
+
 // ── /gap ─────────────────────────────────────────────────────────────────
 
 /// Collect live codebase stats for gap analysis reconciliation.

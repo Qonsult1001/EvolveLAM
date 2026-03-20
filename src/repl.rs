@@ -588,6 +588,19 @@ pub async fn run_repl(
                 commands::handle_coupling(input);
                 continue;
             }
+            s if s == "/refactor" || s.starts_with("/refactor ") => {
+                if let Some(refactor_prompt) = commands::handle_refactor(input) {
+                    last_input = Some(refactor_prompt.clone());
+                    run_prompt(
+                        agent,
+                        &refactor_prompt,
+                        &mut session_total,
+                        &agent_config.model,
+                    )
+                    .await;
+                }
+                continue;
+            }
             "/retry" => {
                 commands::handle_retry(agent, &last_input, &mut session_total, &agent_config.model)
                     .await;
