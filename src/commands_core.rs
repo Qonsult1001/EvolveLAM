@@ -70,6 +70,7 @@ pub const KNOWN_COMMANDS: &[&str] = &[
     "/blame",
     "/runtime-errors",
     "/refactor",
+    "/research",
 ];
 
 /// Well-known model names for `/model <Tab>` completion.

@@ -601,6 +601,10 @@ pub async fn run_repl(
                 }
                 continue;
             }
+            s if s == "/research" || s.starts_with("/research ") => {
+                commands::handle_research(input);
+                continue;
+            }
             "/retry" => {
                 commands::handle_retry(agent, &last_input, &mut session_total, &agent_config.model)
                     .await;

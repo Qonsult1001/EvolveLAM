@@ -20,8 +20,8 @@ pub use crate::commands_git::{
 pub use crate::commands_project::{
     handle_ast, handle_context, handle_coupling, handle_docs, handle_doctor, handle_errors,
     handle_find, handle_fix, handle_gap, handle_health, handle_hypotheses, handle_index,
-    handle_init, handle_lint, handle_refactor, handle_run, handle_run_usage, handle_runtime_errors,
-    handle_test, handle_tree,
+    handle_init, handle_lint, handle_refactor, handle_research, handle_run, handle_run_usage,
+    handle_runtime_errors, handle_test, handle_tree,
 };
 
 // Session-related handlers

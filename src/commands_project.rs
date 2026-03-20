@@ -3336,6 +3336,124 @@ fn handle_coupling_for_dir(_input: &str, src_dir: &std::path::Path, query: &str)
     }
 }
 
+// ── /research ─────────────────────────────────────────────────────────────
+
+/// Fetch web search results from DuckDuckGo Lite and display them.
+/// Optionally saves findings to RESEARCH.md with `/research save <query>`.
+pub fn handle_research(input: &str) {
+    let args = input.strip_prefix("/research").unwrap_or("").trim();
+    if args.is_empty() {
+        println!(
+            "{DIM}  Usage: /research <query>\n\n\
+             Examples:\n\
+             /research rust async error handling patterns\n\
+             /research how does aider handle repo maps\n\
+             /research MCP server ecosystem\n\n\
+             Fetches web results via DuckDuckGo Lite and displays them.{RESET}\n"
+        );
+        return;
+    }
+
+    let (save, query) = if args.starts_with("save ") {
+        (true, args.strip_prefix("save ").unwrap_or(args).trim())
+    } else {
+        (false, args)
+    };
+
+    println!("{DIM}  Searching: {query}...{RESET}");
+
+    // URL-encode the query
+    let encoded: String = query
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c.to_string()
+            } else if c == ' ' {
+                "+".to_string()
+            } else {
+                format!("%{:02X}", c as u32)
+            }
+        })
+        .collect();
+
+    let url = format!("https://lite.duckduckgo.com/lite?q={encoded}");
+
+    let output = std::process::Command::new("curl")
+        .args(["-s", "-L", "--max-time", "10", &url])
+        .output();
+
+    match output {
+        Ok(out) if out.status.success() => {
+            let body = String::from_utf8_lossy(&out.stdout);
+            // Strip HTML tags and extract text
+            let text = strip_html_tags(&body);
+            // Take first 80 meaningful lines
+            let lines: Vec<&str> = text
+                .lines()
+                .map(|l| l.trim())
+                .filter(|l| !l.is_empty() && l.len() > 3)
+                .take(80)
+                .collect();
+
+            if lines.is_empty() {
+                println!("{DIM}  No results found for: {query}{RESET}\n");
+                return;
+            }
+
+            println!("\n{BOLD}  Research: {query}{RESET}\n");
+            for line in &lines {
+                println!("  {line}");
+            }
+            println!();
+
+            if save {
+                // Append to RESEARCH.md
+                let entry = format!(
+                    "\n### [ ] Research: {query}\nGoal: Investigate this topic based on web search results.\n"
+                );
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("RESEARCH.md")
+                {
+                    use std::io::Write;
+                    let _ = write!(f, "{entry}");
+                    println!("{DIM}  Saved to RESEARCH.md{RESET}\n");
+                }
+            }
+        }
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            println!("{DIM}  Search failed: {stderr}{RESET}\n");
+        }
+        Err(e) => {
+            println!("{DIM}  curl not available: {e}{RESET}\n");
+        }
+    }
+}
+
+/// Strip HTML tags from a string (simple regex-free approach).
+fn strip_html_tags(html: &str) -> String {
+    let mut result = String::with_capacity(html.len());
+    let mut in_tag = false;
+    for ch in html.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => result.push(ch),
+            _ => {}
+        }
+    }
+    // Decode common HTML entities
+    result
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#x27;", "'")
+        .replace("&nbsp;", " ")
+}
+
 // ── /refactor ─────────────────────────────────────────────────────────────
 
 /// Build a coordinated multi-file refactoring prompt.
