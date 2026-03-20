@@ -314,3 +314,19 @@ Goal: The evolve skill says to discover and plug in MCP servers autonomously.
 Study the MCP ecosystem — what servers exist, how to discover them, how to
 evaluate which ones would expand coding capabilities. Build a discovery
 workflow that the agent can run during the RESEARCH phase of evolution.
+
+### [ ] Populate domain skills through actual practice
+Goal: All six domain skills (code-rust, code-web, code-systems, code-data,
+code-devops, code-testing) have empty "Patterns Learned" sections. The /brain
+learn command exists but hasn't been used yet. The next evolution session should
+focus on actually coding in different domains and recording validated patterns
+through /brain learn. The test: after one session of real coding practice,
+at least 3 domains should have 2+ patterns each.
+
+### [ ] Improve /refactor with targeted file selection
+Goal: The current /refactor sends all source files (first 200 lines each) to the
+agent. For a 17-file codebase this works, but for larger projects it'll blow the
+context window. Study how Claude Code and Aider select which files to include
+in a refactoring context. Possible approaches: use the coupling graph to select
+only coupled files, let the agent do a two-pass (analyze then edit), or use
+AST-level symbol filtering to include only relevant declarations.
