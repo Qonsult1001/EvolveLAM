@@ -330,3 +330,30 @@ context window. Study how Claude Code and Aider select which files to include
 in a refactoring context. Possible approaches: use the coupling graph to select
 only coupled files, let the agent do a two-pass (analyze then edit), or use
 AST-level symbol filtering to include only relevant declarations.
+
+### [ ] Active brain context injection (SCA Context Lens pattern)
+
+Goal: In the .saidSo target architecture, the SCA Context Lens actively injects
+brain signals back into the Context Manager at "zero latency" during reasoning.
+Currently yoyo's brain is passive — skills load at startup and sit in memory.
+Study how to implement active injection: when the agent encounters a pattern
+that matches a known domain skill, automatically append the relevant learned
+patterns to the next prompt. This is the single biggest architectural gap
+between current yoyo and the target architecture.
+
+### [ ] Entropy-weighted task selection (VibeThinker MGPO insight)
+
+Goal: VibeThinker's training uses maximum entropy weighting — problems where
+the model gets ~50% accuracy receive maximum gradient weight (the capability
+frontier). Apply this to evolution task selection: prioritize tasks at the
+edge of what yoyo can do. Tasks that are too easy (always succeeds) or too
+hard (always reverts) waste evolution cycles. Study how to estimate task
+difficulty from historical revert rates and test outcomes.
+
+### [ ] Multi-model routing via LiteLLM
+
+Goal: The target architecture uses LiteLLM to dispatch to vLLM local, Ollama,
+OpenAI, and Claude API with cost/latency optimization. yoyo already supports
+multiple providers via yoagent, but has no intelligent routing. Study LiteLLM's
+Rust equivalent or consider a Python sidecar. The Model Router should pick
+the cheapest model that can handle each specific task type.
