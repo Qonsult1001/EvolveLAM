@@ -3433,7 +3433,7 @@ pub fn handle_research(input: &str) {
 }
 
 /// Strip HTML tags from a string (simple regex-free approach).
-fn strip_html_tags(html: &str) -> String {
+pub(crate) fn strip_html_tags(html: &str) -> String {
     let mut result = String::with_capacity(html.len());
     let mut in_tag = false;
     for ch in html.chars() {
@@ -4379,5 +4379,142 @@ mod tests {
     #[test]
     fn test_command_exists_unknown() {
         assert!(!command_exists("definitely_not_a_real_command_xyz123"));
+    }
+
+    // -- strip_html_tags --
+
+    #[test]
+    fn test_strip_html_tags_basic() {
+        assert_eq!(strip_html_tags("<p>hello</p>"), "hello");
+    }
+
+    #[test]
+    fn test_strip_html_tags_nested() {
+        assert_eq!(
+            strip_html_tags("<div><span>inner</span> text</div>"),
+            "inner text"
+        );
+    }
+
+    #[test]
+    fn test_strip_html_tags_with_attributes() {
+        assert_eq!(
+            strip_html_tags(r#"<a href="http://example.com">link</a>"#),
+            "link"
+        );
+    }
+
+    #[test]
+    fn test_strip_html_tags_entities() {
+        assert_eq!(strip_html_tags("a &amp; b"), "a & b");
+        assert_eq!(strip_html_tags("&lt;tag&gt;"), "<tag>");
+        assert_eq!(strip_html_tags("&quot;quoted&quot;"), "\"quoted\"");
+        assert_eq!(strip_html_tags("it&#x27;s"), "it's");
+        assert_eq!(strip_html_tags("non&nbsp;breaking"), "non breaking");
+    }
+
+    #[test]
+    fn test_strip_html_tags_empty() {
+        assert_eq!(strip_html_tags(""), "");
+    }
+
+    #[test]
+    fn test_strip_html_tags_no_tags() {
+        assert_eq!(strip_html_tags("plain text"), "plain text");
+    }
+
+    #[test]
+    fn test_strip_html_tags_self_closing() {
+        assert_eq!(strip_html_tags("before<br/>after"), "beforeafter");
+    }
+
+    // -- /research URL encoding --
+
+    #[test]
+    fn test_research_url_encoding_spaces() {
+        let query = "rust async patterns";
+        let encoded: String = query
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                    c.to_string()
+                } else if c == ' ' {
+                    "+".to_string()
+                } else {
+                    format!("%{:02X}", c as u32)
+                }
+            })
+            .collect();
+        assert_eq!(encoded, "rust+async+patterns");
+    }
+
+    #[test]
+    fn test_research_url_encoding_special_chars() {
+        let query = "what's new?";
+        let encoded: String = query
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                    c.to_string()
+                } else if c == ' ' {
+                    "+".to_string()
+                } else {
+                    format!("%{:02X}", c as u32)
+                }
+            })
+            .collect();
+        assert_eq!(encoded, "what%27s+new%3F");
+    }
+
+    #[test]
+    fn test_research_url_encoding_preserves_safe_chars() {
+        let query = "rust-lang_2.0";
+        let encoded: String = query
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                    c.to_string()
+                } else if c == ' ' {
+                    "+".to_string()
+                } else {
+                    format!("%{:02X}", c as u32)
+                }
+            })
+            .collect();
+        assert_eq!(encoded, "rust-lang_2.0");
+    }
+
+    // -- /research empty query handling --
+
+    #[test]
+    fn test_research_empty_input_does_not_panic() {
+        handle_research("/research");
+        handle_research("/research ");
+    }
+
+    // -- /research save prefix parsing --
+
+    #[test]
+    fn test_research_save_prefix_parsing() {
+        let args = "save rust async patterns";
+        let (save, query) = if args.starts_with("save ") {
+            (true, args.strip_prefix("save ").unwrap_or(args).trim())
+        } else {
+            (false, args)
+        };
+        assert!(save);
+        assert_eq!(query, "rust async patterns");
+    }
+
+    #[test]
+    fn test_research_no_save_prefix() {
+        let args = "rust async patterns";
+        let (save, query) = if args.starts_with("save ") {
+            (true, args.strip_prefix("save ").unwrap_or(args).trim())
+        } else {
+            (false, args)
+        };
+        assert!(!save);
+        assert_eq!(query, "rust async patterns");
     }
 }
