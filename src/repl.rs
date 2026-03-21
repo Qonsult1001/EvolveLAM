@@ -5,8 +5,10 @@ use crate::commands::{
     self, auto_compact_if_needed, command_arg_completions, is_unknown_command, thinking_level_name,
     KNOWN_COMMANDS,
 };
+use crate::context_lens::ContextLens;
 use crate::format::*;
 use crate::git::*;
+use crate::memory::ConnectionGraph;
 use crate::prompt::*;
 use crate::AgentConfig;
 
@@ -203,6 +205,16 @@ pub async fn run_repl(
     openapi_count: u32,
     continue_session: bool,
 ) {
+    // Create the SCA Context Lens for active brain injection per-prompt
+    let graph = ConnectionGraph::load();
+    let skills_path = std::path::Path::new("skills");
+    let skills_dir = if skills_path.is_dir() {
+        Some(skills_path.to_path_buf())
+    } else {
+        None
+    };
+    let lens = ContextLens::new(graph, skills_dir);
+
     let cwd = std::env::current_dir()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| "(unknown)".to_string());
@@ -600,6 +612,7 @@ pub async fn run_repl(
                         &refactor_prompt,
                         &mut session_total,
                         &agent_config.model,
+                        Some(&lens),
                     )
                     .await;
                 }
@@ -645,7 +658,14 @@ pub async fn run_repl(
                 .await
                 {
                     last_input = Some(context_msg.clone());
-                    run_prompt(agent, &context_msg, &mut session_total, &agent_config.model).await;
+                    run_prompt(
+                        agent,
+                        &context_msg,
+                        &mut session_total,
+                        &agent_config.model,
+                        Some(&lens),
+                    )
+                    .await;
                     auto_compact_if_needed(agent);
                 }
                 continue;
@@ -669,7 +689,14 @@ pub async fn run_repl(
         }
 
         last_input = Some(input.to_string());
-        run_prompt(agent, input, &mut session_total, &agent_config.model).await;
+        run_prompt(
+            agent,
+            input,
+            &mut session_total,
+            &agent_config.model,
+            Some(&lens),
+        )
+        .await;
 
         // Auto-compact when context window is getting full
         auto_compact_if_needed(agent);

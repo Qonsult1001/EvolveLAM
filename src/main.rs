@@ -42,6 +42,7 @@ mod commands_git;
 mod commands_memory;
 mod commands_project;
 mod commands_session;
+mod context_lens;
 mod docs;
 mod format;
 mod git;
@@ -1065,6 +1066,7 @@ async fn main() {
             prompt_text.trim(),
             &mut session_total,
             &agent_config.model,
+            None,
         )
         .await;
         write_output_file(&output_path, &response);
@@ -1086,7 +1088,14 @@ async fn main() {
             agent_config.model
         );
         let mut session_total = Usage::default();
-        let response = run_prompt(&mut agent, input, &mut session_total, &agent_config.model).await;
+        let response = run_prompt(
+            &mut agent,
+            input,
+            &mut session_total,
+            &agent_config.model,
+            None,
+        )
+        .await;
         write_output_file(&output_path, &response);
         return;
     }

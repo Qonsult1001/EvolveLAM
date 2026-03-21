@@ -404,7 +404,7 @@ pub async fn handle_retry(
         Some(prev) => {
             println!("{DIM}  (retrying last input){RESET}");
             let retry_input = prev.clone();
-            run_prompt(agent, &retry_input, session_total, model).await;
+            run_prompt(agent, &retry_input, session_total, model, None).await;
             auto_compact_if_needed(agent);
         }
         None => {

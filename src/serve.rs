@@ -245,7 +245,7 @@ async fn handle_connection(
 
         // Non-streaming: run full prompt and return
         let mut usage = yoagent::Usage::default();
-        let response_text = run_prompt(&mut agent, &prompt, &mut usage, &config.model).await;
+        let response_text = run_prompt(&mut agent, &prompt, &mut usage, &config.model, None).await;
 
         println!(
             "{DIM}  [{peer}] response: {} chars, {} in + {} out tokens{RESET}",
@@ -315,7 +315,8 @@ async fn handle_connection(
         // Create a fresh agent for this request (conversation isolation)
         let mut agent = config.build_agent();
         let mut usage = yoagent::Usage::default();
-        let response_text = run_prompt(&mut agent, &full_prompt, &mut usage, &config.model).await;
+        let response_text =
+            run_prompt(&mut agent, &full_prompt, &mut usage, &config.model, None).await;
 
         let completion_id = format!(
             "cmpl-{}",

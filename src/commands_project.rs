@@ -1758,7 +1758,7 @@ pub async fn handle_fix(
     }
     println!("\n{YELLOW}  Sending {fail_count} failure(s) to AI for fixing...{RESET}\n");
     let fix_prompt = build_fix_prompt(&failures);
-    run_prompt(agent, &fix_prompt, session_total, model).await;
+    run_prompt(agent, &fix_prompt, session_total, model, None).await;
     auto_compact_if_needed(agent);
     Some(fix_prompt)
 }

@@ -1,6 +1,7 @@
 //! Prompt execution and agent interaction.
 
 use crate::cli::is_verbose;
+use crate::context_lens::ContextLens;
 use crate::format::*;
 use std::collections::HashMap;
 use std::io::{self, Write};
@@ -467,8 +468,25 @@ enum PromptResult {
 
 /// Execute a single prompt attempt and process all events.
 /// Returns whether we got a retriable error (so the caller can retry).
-async fn run_prompt_once(agent: &mut Agent, input: &str) -> PromptResult {
-    let mut rx = agent.prompt(input).await;
+async fn run_prompt_once(
+    agent: &mut Agent,
+    input: &str,
+    lens: Option<&ContextLens>,
+) -> PromptResult {
+    // Active brain context injection: query the lens and enrich the input
+    let enriched_input;
+    let effective_input = if let Some(lens) = lens {
+        let ctx = lens.query(input);
+        if ctx.relevance_score > 0.1 && !ctx.text.is_empty() {
+            enriched_input = format!("{input}\n\n---\n{}", ctx.text);
+            &enriched_input
+        } else {
+            input
+        }
+    } else {
+        input
+    };
+    let mut rx = agent.prompt(effective_input).await;
     let mut usage = Usage::default();
     let mut in_text = false;
     let mut tool_timers: HashMap<String, Instant> = HashMap::new();
@@ -716,6 +734,7 @@ pub async fn run_prompt(
     input: &str,
     session_total: &mut Usage,
     model: &str,
+    lens: Option<&ContextLens>,
 ) -> String {
     let prompt_start = Instant::now();
     let mut total_usage = Usage::default();
@@ -732,7 +751,7 @@ pub async fn run_prompt(
             }
         }
 
-        match run_prompt_once(agent, input).await {
+        match run_prompt_once(agent, input, lens).await {
             PromptResult::Done {
                 collected_text: text,
                 usage,

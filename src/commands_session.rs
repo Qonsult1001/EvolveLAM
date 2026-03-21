@@ -512,7 +512,7 @@ pub async fn handle_spawn(
             let mut sub_agent = agent_config.build_agent();
 
             // Run the task as a single prompt on the subagent
-            let response = run_prompt(&mut sub_agent, &task, session_total, model).await;
+            let response = run_prompt(&mut sub_agent, &task, session_total, model, None).await;
 
             let result_text = if response.trim().is_empty() {
                 "(no output)".to_string()

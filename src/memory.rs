@@ -698,6 +698,8 @@ impl ConnectionGraph {
     }
 
     /// Format the connection graph summary for inclusion in prompts.
+    /// Currently used only in tests; dynamic injection via ContextLens replaces static usage.
+    #[allow(dead_code)]
     pub fn format_for_prompt(&self) -> Option<String> {
         if self.edges.is_empty() {
             return None;
@@ -930,7 +932,6 @@ const STOP_WORDS: &[&str] = &[
 /// Splits on non-alphanumeric boundaries, lowercases, filters stop words,
 /// discards short tokens (<3 chars) and pure numbers, then deduplicates.
 /// Also detects common bigrams (two-word compound concepts).
-#[cfg(test)]
 pub fn extract_concepts(text: &str) -> Vec<String> {
     extract_concepts_inner(text, text)
 }
