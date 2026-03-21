@@ -24,3 +24,8 @@
 {"day": 20, "task_num": 3, "title": "Add /refactor command for coordinated multi-file changes", "outcome": "verified"}
 {"day": 20, "task_num": 4, "title": "Implement /research command for in-REPL web research", "outcome": "verified"}
 {"day": 20, "task_num": 5, "title": "Add /brain command \u2014 query and grow the knowledge system", "outcome": "verified"}
+{"day": 21, "task_num": 1, "title": "Add tests for /brain command \u2014 status, gaps, learn subcommands", "outcome": "verified"}
+{"day": 21, "task_num": 2, "title": "Add tests for /research command \u2014 query building, HTML stripping, URL encoding", "outcome": "verified"}
+{"day": 21, "task_num": 3, "title": "Add tests for /refactor command \u2014 prompt construction and empty input handling", "outcome": "verified"}
+{"day": 21, "task_num": 4, "title": "Fix SESSION_START_SHA unbound variable in evolve-ide.sh finish", "outcome": "verified"}
+{"day": 21, "task_num": 5, "title": "Update gap analysis for Day 20 work", "outcome": "verified"}

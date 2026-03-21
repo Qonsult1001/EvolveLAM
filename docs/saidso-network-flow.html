@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>.saidSo — Network Flow Diagram</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #fff;
+    color: #1a1a1a;
+    font-family: 'IBM Plex Sans', sans-serif;
+  }
+
+  .page {
+    max-width: 1300px;
+    margin: 0 auto;
+    padding: 48px 40px;
+  }
+
+  header {
+    border-bottom: 2px solid #1a1a1a;
+    padding-bottom: 18px;
+    margin-bottom: 28px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+
+  header h1 {
+    font-family: 'IBM Plex Mono', monospace;
+    font-weight: 600;
+    font-size: 1.5rem;
+    letter-spacing: -0.01em;
+    color: #1a1a1a;
+  }
+
+  header h1 span { font-weight: 400; color: #666; }
+
+  .header-meta {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.7rem;
+    color: #999;
+    text-align: right;
+    line-height: 1.7;
+  }
+
+  .legend {
+    display: flex;
+    gap: 28px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 24px;
+    padding: 12px 18px;
+    background: #f6f6f6;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.68rem;
+    color: #444;
+  }
+
+  .legend-title {
+    font-weight: 600;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    padding-right: 8px;
+    border-right: 1px solid #ccc;
+  }
+
+  .legend-item { display: flex; align-items: center; gap: 7px; }
+  .l-box { width: 18px; height: 12px; flex-shrink: 0; }
+  .l-solid { border: 1.5px solid #1a1a1a; background: #fff; }
+  .l-shaded { border: 1px solid #1a1a1a; background: #e0e0e0; }
+  .l-core { background: #1a1a1a; border: none; }
+  .l-dashed { border: 1.5px dashed #666; background: #f0f0f0; }
+  .l-line { width: 28px; height: 0; border-top: 1.5px solid #1a1a1a; }
+  .l-dash-line { width: 28px; height: 0; border-top: 1.5px dashed #888; }
+
+  .diagram-wrap {
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    overflow-x: auto;
+    background: #fff;
+    margin-bottom: 28px;
+  }
+
+  svg { display: block; min-width: 1140px; width: 100%; height: auto; }
+
+  .info-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.71rem;
+    margin-bottom: 28px;
+  }
+
+  .info-table th {
+    background: #1a1a1a;
+    color: #fff;
+    padding: 9px 14px;
+    text-align: left;
+    font-size: 0.63rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 600;
+  }
+
+  .info-table td {
+    padding: 9px 14px;
+    border-bottom: 1px solid #e4e4e4;
+    vertical-align: top;
+    color: #333;
+    line-height: 1.5;
+  }
+
+  .info-table tr:nth-child(even) td { background: #f8f8f8; }
+  .info-table td:first-child { font-weight: 600; color: #1a1a1a; white-space: nowrap; }
+  .info-table td:nth-child(2) { white-space: nowrap; }
+
+  footer {
+    padding-top: 16px;
+    border-top: 1px solid #ddd;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.62rem;
+    color: #bbb;
+    display: flex;
+    justify-content: space-between;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <div>
+      <h1>.saidSo <span>/ RAX Engine</span></h1>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:#999;margin-top:4px;">Network Architecture &amp; Data Flow Diagram</div>
+    </div>
+    <div class="header-meta">
+      SAID Research · Confidential<br>
+      SCA Architecture · v1.0
+    </div>
+  </header>
+
+  <div class="legend">
+    <span class="legend-title">Legend</span>
+    <div class="legend-item"><div class="l-box l-solid"></div> Standard Component</div>
+    <div class="legend-item"><div class="l-box l-shaded"></div> Supporting Component</div>
+    <div class="legend-item"><div class="l-box l-dashed"></div> SCA Sub-Component</div>
+    <div class="legend-item"><div class="l-box l-core"></div> Core Engine</div>
+    <div class="legend-item"><div class="l-line"></div> Primary Data Flow</div>
+    <div class="legend-item"><div class="l-dash-line"></div> SCA Signal / Secondary Flow</div>
+  </div>
+
+  <div class="diagram-wrap">
+    <svg viewBox="0 0 1200 830" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="a1" markerWidth="8" markerHeight="7" refX="7" refY="3.5" orient="auto">
+          <polygon points="0 0, 8 3.5, 0 7" fill="#1a1a1a"/>
+        </marker>
+        <marker id="a2" markerWidth="7" markerHeight="6" refX="6" refY="3" orient="auto">
+          <polygon points="0 0, 7 3, 0 6" fill="#888"/>
+        </marker>
+      </defs>
+
+      <!-- ── LAYER BANDS ── -->
+      <rect x="12" y="12" width="1176" height="108" rx="2" fill="#fafafa" stroke="#ccc" stroke-width="1"/>
+      <text x="24" y="30" font-family="IBM Plex Mono,monospace" font-size="8.5" font-weight="600" fill="#aaa" letter-spacing="2">LAYER 1 — CLIENT INTERFACES</text>
+
+      <rect x="12" y="132" width="1176" height="120" rx="2" fill="#f6f6f6" stroke="#bbb" stroke-width="1"/>
+      <text x="24" y="150" font-family="IBM Plex Mono,monospace" font-size="8.5" font-weight="600" fill="#888" letter-spacing="2">LAYER 2 — RAX ENGINE  (Reasoning &amp; Attention eXecutor)</text>
+
+      <rect x="12" y="264" width="1176" height="152" rx="2" fill="#f0f0f0" stroke="#999" stroke-width="1.5" stroke-dasharray="7,4"/>
+      <text x="24" y="282" font-family="IBM Plex Mono,monospace" font-size="8.5" font-weight="600" fill="#666" letter-spacing="2">LAYER 3 — SCA CORE  (SAID Crystalline Attention · Holographic 1-Bit Exocortex)</text>
+
+      <rect x="12" y="428" width="560" height="112" rx="2" fill="#fafafa" stroke="#ccc" stroke-width="1"/>
+      <text x="24" y="446" font-family="IBM Plex Mono,monospace" font-size="8.5" font-weight="600" fill="#aaa" letter-spacing="2">LAYER 4 — MODEL LAYER</text>
+
+      <rect x="588" y="428" width="600" height="112" rx="2" fill="#f0f0f0" stroke="#888" stroke-width="1.5"/>
+      <text x="600" y="446" font-family="IBM Plex Mono,monospace" font-size="8.5" font-weight="600" fill="#555" letter-spacing="2">LAYER 5 — .said  (Flat File · Sole Persistence)</text>
+
+      <rect x="12" y="552" width="1176" height="264" rx="2" fill="#fafafa" stroke="#ccc" stroke-width="1"/>
+      <text x="24" y="570" font-family="IBM Plex Mono,monospace" font-size="8.5" font-weight="600" fill="#aaa" letter-spacing="2">LAYER 6 — OUTPUT / DEVELOPER INTERFACE</text>
+
+      <!-- ── LAYER 1: CLIENT NODES ── -->
+      <rect x="32" y="38" width="150" height="62" rx="2" fill="#fff" stroke="#1a1a1a" stroke-width="1.5"/>
+      <text x="107" y="64" font-family="IBM Plex Sans,sans-serif" font-size="11" font-weight="600" fill="#1a1a1a" text-anchor="middle">VS Code Ext.</text>
+      <text x="107" y="80" font-family="IBM Plex Mono,monospace" font-size="8" fill="#777" text-anchor="middle">LSP · Webview</text>
+
+      <rect x="206" y="38" width="150" height="62" rx="2" fill="#fff" stroke="#1a1a1a" stroke-width="1.5"/>
+      <text x="281" y="64" font-family="IBM Plex Sans,sans-serif" font-size="11" font-weight="600" fill="#1a1a1a" text-anchor="middle">Web IDE</text>
+      <text x="281" y="80" font-family="IBM Plex Mono,monospace" font-size="8" fill="#777" text-anchor="middle">React · Monaco</text>
+
+      <rect x="380" y="38" width="150" height="62" rx="2" fill="#fff" stroke="#1a1a1a" stroke-width="1.5"/>
+      <text x="455" y="64" font-family="IBM Plex Sans,sans-serif" font-size="11" font-weight="600" fill="#1a1a1a" text-anchor="middle">CLI / REPL</text>
+      <text x="455" y="80" font-family="IBM Plex Mono,monospace" font-size="8" fill="#777" text-anchor="middle">saidSo shell</text>
+
+      <rect x="554" y="38" width="150" height="62" rx="2" fill="#fff" stroke="#1a1a1a" stroke-width="1.5"/>
+      <text x="629" y="64" font-family="IBM Plex Sans,sans-serif" font-size="11" font-weight="600" fill="#1a1a1a" text-anchor="middle">API Client</text>
+      <text x="629" y="80" font-family="IBM Plex Mono,monospace" font-size="8" fill="#777" text-anchor="middle">REST · WS · SSE</text>
+
+      <rect x="728" y="38" width="150" height="62" rx="2" fill="#fff" stroke="#1a1a1a" stroke-width="1.5"/>
+      <text x="803" y="64" font-family="IBM Plex Sans,sans-serif" font-size="11" font-weight="600" fill="#1a1a1a" text-anchor="middle">Notebooks</text>
+      <text x="803" y="80" font-family="IBM Plex Mono,monospace" font-size="8" fill="#777" text-anchor="middle">Jupyter-compatible</text>
+
+      <rect x="902" y="38" width="270" height="62" rx="2" fill="#e8e8e8" stroke="#1a1a1a" stroke-width="1"/>
+      <text x="1037" y="64" font-family="IBM Plex Sans,sans-serif" font-size="11" font-weight="600" fill="#1a1a1a" text-anchor="middle">GitHub Copilot Shim</text>
+      <text x="1037" y="80" font-family="IBM Plex Mono,monospace" font-size="8" fill="#555" text-anchor="middle">drop-in compatibility bridge</text>
+
+      <!-- ── LAYER 2: RAX NODES ── -->
+      <rect x="32" y="158" width="160" height="76" rx="2" fill="#fff" stroke="#1a1a1a" stroke-width="1.5"/>
+      <text x="112" y="184" font-family="IBM Plex Sans,sans-serif" font-size="11" font-weight="600" fill="#1a1a1a" text-anchor="middle">API Gateway</text>
+      <text x="112" y="200" font-family="IBM Plex Mono,monospace" font-size="8" fill="#777" text-anchor="middle">FastAPI · LiteLLM</text>
+      <text x="112" y="214" font-family="IBM Plex Mono,monospace" font-size="8" fill="#777" text-anchor="middle">auth · rate-limit</text>
+
+      <rect x="212" y="158" width="160" height="76" rx="2" fill="#fff" stroke="#1a1a1a" stroke-width="1.5"/>
+      <text x="292" y="184" font-family="IBM Plex Sans,sans-serif" font-size="11" font-weight="600" fill="#1a1a1a" text-anchor="middle">Context Manager</text>
+      <text x="292" y="200" font-family="IBM Plex Mono,monospace" font-size="8" fill="#777" text-anchor="middle">streaming ctx injection</text>
+      <text x="292" y="214" font-family="IBM Plex Mono,monospace" font-size="8" fill="#777" text-anchor="middle">LangGraph</text>
+
+      <rect x="392" y="158" width="160" height="76" rx="2" fill="#fff" stroke="#1a1a1a" stroke-width="1.5"/>
+      <text x="472" y="184" font-family="IBM Plex Sans,sans-serif" font-size="11" font-weight="600" fill="#1a1a1a" text-anchor="middle">Tool Executor</text>
+      <text x="472" y="200" font-family="IBM Plex Mono,monospace" font-size="8" fill="#777" text-anchor="middle">bash · file · browser</text>
+      <text x="472" y="214" font-family="IBM Plex Mono,monospace" font-size="8" fill="#777" text-anchor="middle">MCP protocol</text>
+
+      <rect x="572" y="158" width="160" height="76" rx="2" fill="#fff" stroke="#1a1a1a" stroke-width="1.5"/>
+      <text x="652" y="184" font-family="IBM Plex Sans,sans-serif" font-size="11" font-weight="600" fill="#1a1a1a" text-anchor="middle">Agent Scheduler</text>
+      <text x="652" y="200" font-family="IBM Plex Mono,monospace" font-size="8" fill="#777" text-anchor="middle">multi-agent planner</text>
+      <text x="652" y="214" font-family="IBM Plex Mono,monospace" font-size="8" fill="#777" text-anchor="middle">LangGraph runtime</text>
+
+      <rect x="752" y="158" width="160" height="76" rx="2" fill="#fff" stroke="#1a1a1a" stroke-width="1.5"/>
+      <text x="832" y="184" font-family="IBM Plex Sans,sans-serif" font-size="11" font-weight="600" fill="#1a1a1a" text-anchor="middle">Model Router</text>
+      <text x="832" y="200" font-family="IBM Plex Mono,monospace" font-size="8" fill="#777" text-anchor="middle">LiteLLM dispatch</text>
+      <text x="832" y="214" font-family="IBM Plex Mono,monospace" font-size="8" fill="#777" text-anchor="middle">cost · latency opt.</text>
+
+      <rect x="932" y="158" width="160" height="76" rx="2" fill="#e8e8e8" stroke="#1a1a1a" stroke-width="1"/>
+      <text x="1012" y="184" font-family="IBM Plex Sans,sans-serif" font-size="11" font-weight="600" fill="#1a1a1a" text-anchor="middle">Evaluator</text>
+      <text x="1012" y="200" font-family="IBM Plex Mono,monospace" font-size="8" fill="#555" text-anchor="middle">quality scoring</text>
+      <text x="1012" y="214" font-family="IBM Plex Mono,monospace" font-size="8" fill="#555" text-anchor="middle">RLHF loops</text>
+
+      <!-- ── LAYER 3: SCA NODES ── -->
+      <!-- Crystallizer -->
+      <rect x="32" y="294" width="155" height="78" rx="2" fill="#fff" stroke="#444" stroke-width="1" stroke-dasharray="5,3"/>
+      <text x="109" y="320" font-family="IBM Plex Sans,sans-serif" font-size="11" font-weight="600" fill="#1a1a1a" text-anchor="middle">Crystallizer</text>
+      <text x="109" y="336" font-family="IBM Plex Mono,monospace" font-size="8" fill="#555" text-anchor="middle">token → 1-bit quant.</text>
+      <text x="109" y="350" font-family="IBM Plex Mono,monospace" font-size="8" fill="#555" text-anchor="middle">signal extraction</text>
+
+      <!-- Holographic Index -->
+      <rect x="207" y="294" width="155" height="78" rx="2" fill="#fff" stroke="#444" stroke-width="1" stroke-dasharray="5,3"/>
+      <text x="284" y="320" font-family="IBM Plex Sans,sans-serif" font-size="11" font-weight="600" fill="#1a1a1a" text-anchor="middle">Holographic Index</text>
+      <text x="284" y="336" font-family="IBM Plex Mono,monospace" font-size="8" fill="#555" text-anchor="middle">O(1) retrieval</text>
+      <text x="284" y="350" font-family="IBM Plex Mono,monospace" font-size="8" fill="#555" text-anchor="middle">fingerprint table</text>
+
+      <!-- SCA CORE — filled black center -->
+      <rect x="382" y="284" width="192" height="98" rx="3" fill="#1a1a1a" stroke="#1a1a1a" stroke-width="2"/>
+      <text x="478" y="320" font-family="IBM Plex Mono,monospace" font-size="13" font-weight="600" fill="#fff" text-anchor="middle">SCA CORE</text>
+      <text x="478" y="338" font-family="IBM Plex Mono,monospace" font-size="8" fill="#aaa" text-anchor="middle">1-Bit Holographic Exocortex</text>
+      <text x="478" y="354" font-family="IBM Plex Mono,monospace" font-size="8" fill="#aaa" text-anchor="middle">zero-latency · infinite context</text>
+      <text x="478" y="370" font-family="IBM Plex Mono,monospace" font-size="7" fill="#777" text-anchor="middle">replaces all vector databases</text>
+
+      <!-- Context Lens -->
+      <rect x="594" y="294" width="155" height="78" rx="2" fill="#fff" stroke="#444" stroke-width="1" stroke-dasharray="5,3"/>
+      <text x="671" y="320" font-family="IBM Plex Sans,sans-serif" font-size="11" font-weight="600" fill="#1a1a1a" text-anchor="middle">Context Lens</text>
+      <text x="671" y="336" font-family="IBM Plex Mono,monospace" font-size="8" fill="#555" text-anchor="middle">zero-latency injection</text>
+      <text x="671" y="350" font-family="IBM Plex Mono,monospace" font-size="8" fill="#555" text-anchor="middle">crystalline signal out</text>
+
+      <!-- Pattern Resonator -->
+      <rect x="769" y="294" width="155" height="78" rx="2" fill="#fff" stroke="#444" stroke-width="1" stroke-dasharray="5,3"/>
+      <text x="846" y="320" font-family="IBM Plex Sans,sans-serif" font-size="11" font-weight="600" fill="#1a1a1a" text-anchor="middle">Pattern Resonator</text>
+      <text x="846" y="336" font-family="IBM Plex Mono,monospace" font-size="8" fill="#555" text-anchor="middle">code pattern match</text>
+      <text x="846" y="350" font-family="IBM Plex Mono,monospace" font-size="8" fill="#555" text-anchor="middle">semantic coherence</text>
+
+      <!-- Stream Buffer -->
+      <rect x="944" y="294" width="148" height="78" rx="2" fill="#e8e8e8" stroke="#444" stroke-width="1" stroke-dasharray="5,3"/>
+      <text x="1018" y="320" font-family="IBM Plex Sans,sans-serif" font-size="11" font-weight="600" fill="#1a1a1a" text-anchor="middle">Stream Buffer</text>
+      <text x="1018" y="336" font-family="IBM Plex Mono,monospace" font-size="8" fill="#555" text-anchor="middle">ctx chunking</text>
+      <text x="1018" y="350" font-family="IBM Plex Mono,monospace" font-size="8" fill="#555" text-anchor="middle">hot-path cache</text>
+
+      <!-- ── LAYER 4: MODEL NODES ── -->
+      <rect x="32" y="456" width="116" height="60" rx="2" fill="#fff" stroke="#1a1a1a" stroke-width="1.5"/>
+      <text x="90" y="480" font-family="IBM Plex Sans,sans-serif" font-size="11" font-weight="600" fill="#1a1a1a" text-anchor="middle">vLLM Local</text>
+      <text x="90" y="496" font-family="IBM Plex Mono,monospace" font-size="8" fill="#777" text-anchor="middle">Qwen · Llama · DS</text>
+
+      <rect x="164" y="456" width="116" height="60" rx="2" fill="#fff" stroke="#1a1a1a" stroke-width="1.5"/>
+      <text x="222" y="480" font-family="IBM Plex Sans,sans-serif" font-size="11" font-weight="600" fill="#1a1a1a" text-anchor="middle">Ollama</text>
+      <text x="222" y="496" font-family="IBM Plex Mono,monospace" font-size="8" fill="#777" text-anchor="middle">local model server</text>
+
+      <rect x="296" y="456" width="116" height="60" rx="2" fill="#e8e8e8" stroke="#1a1a1a" stroke-width="1"/>
+      <text x="354" y="480" font-family="IBM Plex Sans,sans-serif" font-size="11" font-weight="600" fill="#1a1a1a" text-anchor="middle">OpenAI API</text>
+      <text x="354" y="496" font-family="IBM Plex Mono,monospace" font-size="8" fill="#555" text-anchor="middle">GPT-4o · o3</text>
+
+      <rect x="428" y="456" width="116" height="60" rx="2" fill="#e8e8e8" stroke="#1a1a1a" stroke-width="1"/>
+      <text x="486" y="480" font-family="IBM Plex Sans,sans-serif" font-size="11" font-weight="600" fill="#1a1a1a" text-anchor="middle">Claude API</text>
+      <text x="486" y="496" font-family="IBM Plex Mono,monospace" font-size="8" fill="#555" text-anchor="middle">Anthropic</text>
+
+      <!-- ── LAYER 5: .said ── -->
+      <rect x="634" y="450" width="518" height="72" rx="3" fill="#1a1a1a" stroke="#1a1a1a" stroke-width="2"/>
+      <text x="893" y="476" font-family="IBM Plex Mono,monospace" font-size="16" font-weight="600" fill="#fff" text-anchor="middle">.said</text>
+      <text x="893" y="496" font-family="IBM Plex Mono,monospace" font-size="8" fill="#aaa" text-anchor="middle">flat file · indexing · caching · persistence · 1-bit holographic fingerprint store</text>
+      <text x="893" y="511" font-family="IBM Plex Mono,monospace" font-size="7.5" fill="#777" text-anchor="middle">sole persistence layer — no database required</text>
+
+      <!-- ── LAYER 6: OUTPUT NODES ── -->
+      <rect x="32" y="584" width="168" height="60" rx="2" fill="#fff" stroke="#1a1a1a" stroke-width="1.5"/>
+      <text x="116" y="608" font-family="IBM Plex Sans,sans-serif" font-size="11" font-weight="600" fill="#1a1a1a" text-anchor="middle">Code Diff View</text>
+      <text x="116" y="624" font-family="IBM Plex Mono,monospace" font-size="8" fill="#777" text-anchor="middle">inline suggestions · accept/reject</text>
+
+      <rect x="218" y="584" width="168" height="60" rx="2" fill="#fff" stroke="#1a1a1a" stroke-width="1.5"/>
+      <text x="302" y="608" font-family="IBM Plex Sans,sans-serif" font-size="11" font-weight="600" fill="#1a1a1a" text-anchor="middle">Completion Stream</text>
+      <text x="302" y="624" font-family="IBM Plex Mono,monospace" font-size="8" fill="#777" text-anchor="middle">SSE token streaming</text>
+
+      <rect x="404" y="584" width="168" height="60" rx="2" fill="#fff" stroke="#1a1a1a" stroke-width="1.5"/>
+      <text x="488" y="608" font-family="IBM Plex Sans,sans-serif" font-size="11" font-weight="600" fill="#1a1a1a" text-anchor="middle">Agent Actions</text>
+      <text x="488" y="624" font-family="IBM Plex Mono,monospace" font-size="8" fill="#777" text-anchor="middle">file writes · shell exec</text>
+
+      <rect x="590" y="584" width="168" height="60" rx="2" fill="#fff" stroke="#1a1a1a" stroke-width="1.5"/>
+      <text x="674" y="608" font-family="IBM Plex Sans,sans-serif" font-size="11" font-weight="600" fill="#1a1a1a" text-anchor="middle">Chat Panel</text>
+      <text x="674" y="624" font-family="IBM Plex Mono,monospace" font-size="8" fill="#777" text-anchor="middle">markdown · citations</text>
+
+      <rect x="776" y="584" width="168" height="60" rx="2" fill="#e8e8e8" stroke="#1a1a1a" stroke-width="1"/>
+      <text x="860" y="608" font-family="IBM Plex Sans,sans-serif" font-size="11" font-weight="600" fill="#1a1a1a" text-anchor="middle">Diagnostics</text>
+      <text x="860" y="624" font-family="IBM Plex Mono,monospace" font-size="8" fill="#555" text-anchor="middle">telemetry · traces · logs</text>
+
+      <rect x="962" y="584" width="210" height="60" rx="2" fill="#e8e8e8" stroke="#444" stroke-width="1" stroke-dasharray="4,3"/>
+      <text x="1067" y="608" font-family="IBM Plex Sans,sans-serif" font-size="11" font-weight="600" fill="#1a1a1a" text-anchor="middle">SCA Memory View</text>
+      <text x="1067" y="624" font-family="IBM Plex Mono,monospace" font-size="8" fill="#555" text-anchor="middle">session fingerprint summary</text>
+
+      <!-- Feedback / response labels at bottom -->
+      <rect x="32" y="664" width="720" height="112" rx="2" fill="#fafafa" stroke="#ddd" stroke-width="1"/>
+      <text x="44" y="686" font-family="IBM Plex Mono,monospace" font-size="8" font-weight="600" fill="#aaa" letter-spacing="1.5">RESPONSE FLOWS</text>
+      <text x="44" y="706" font-family="IBM Plex Mono,monospace" font-size="8" fill="#888">① Model inference results streamed via LiteLLM → Model Router → Context Manager → Completion Stream</text>
+      <text x="44" y="722" font-family="IBM Plex Mono,monospace" font-size="8" fill="#888">② SCA crystalline signals injected into active context window at zero latency via Context Lens → Context Manager</text>
+      <text x="44" y="738" font-family="IBM Plex Mono,monospace" font-size="8" fill="#888">③ .said file persists all session state — loaded on startup, updated on each SCA crystallisation cycle</text>
+      <text x="44" y="754" font-family="IBM Plex Mono,monospace" font-size="8" fill="#888">④ Agent tool results fed back through Tool Executor → Agent Scheduler → output rendered in Agent Actions panel</text>
+
+      <!-- ═══════════════════════════════════════════════
+           ALL FLOW ARROWS
+      ═══════════════════════════════════════════════ -->
+
+      <!-- ─ L1 → L2: All clients converge on API Gateway via collection line ─ -->
+      <!-- vertical drop from each client to a horizontal collector at y=132 -->
+      <line x1="107" y1="100" x2="107" y2="130" stroke="#1a1a1a" stroke-width="1.5"/>
+      <line x1="281" y1="100" x2="281" y2="130" stroke="#1a1a1a" stroke-width="1.5"/>
+      <line x1="455" y1="100" x2="455" y2="130" stroke="#1a1a1a" stroke-width="1.5"/>
+      <line x1="629" y1="100" x2="629" y2="130" stroke="#1a1a1a" stroke-width="1"/>
+      <line x1="803" y1="100" x2="803" y2="130" stroke="#1a1a1a" stroke-width="1"/>
+      <line x1="1037" y1="100" x2="1037" y2="130" stroke="#888" stroke-width="1" stroke-dasharray="4,3"/>
+      <!-- horizontal collector bar -->
+      <line x1="107" y1="130" x2="1037" y2="130" stroke="#1a1a1a" stroke-width="1.5"/>
+      <!-- drop from collector to Gateway -->
+      <line x1="112" y1="130" x2="112" y2="158" stroke="#1a1a1a" stroke-width="1.5" marker-end="url(#a1)"/>
+
+      <!-- ─ L2: RAX internal left-to-right ─ -->
+      <line x1="192" y1="196" x2="212" y2="196" stroke="#1a1a1a" stroke-width="1.5" marker-end="url(#a1)"/>
+      <line x1="372" y1="196" x2="392" y2="196" stroke="#1a1a1a" stroke-width="1.5" marker-end="url(#a1)"/>
+      <line x1="552" y1="196" x2="572" y2="196" stroke="#1a1a1a" stroke-width="1.5" marker-end="url(#a1)"/>
+      <line x1="732" y1="196" x2="752" y2="196" stroke="#1a1a1a" stroke-width="1.5" marker-end="url(#a1)"/>
+      <line x1="912" y1="196" x2="932" y2="196" stroke="#888" stroke-width="1" marker-end="url(#a2)"/>
+
+      <!-- ─ L2 → L3: RAX feeds SCA ─ -->
+      <!-- Context Manager → Crystallizer -->
+      <path d="M 292 234 L 292 254 L 109 254 L 109 294" stroke="#555" stroke-width="1.5" stroke-dasharray="5,3" fill="none" marker-end="url(#a2)"/>
+      <text x="195" y="249" font-family="IBM Plex Mono,monospace" font-size="7.5" fill="#555" text-anchor="middle">ctx stream</text>
+
+      <!-- Context Manager → SCA Core -->
+      <path d="M 340 234 L 340 262 L 478 262 L 478 284" stroke="#555" stroke-width="1.5" stroke-dasharray="5,3" fill="none" marker-end="url(#a2)"/>
+
+      <!-- Agent Scheduler → SCA Core -->
+      <path d="M 652 234 L 652 268 L 530 268 L 530 284" stroke="#888" stroke-width="1" stroke-dasharray="4,3" fill="none" marker-end="url(#a2)"/>
+
+      <!-- ─ L3: SCA internal flow ─ -->
+      <line x1="187" y1="333" x2="207" y2="333" stroke="#444" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#a2)"/>
+      <line x1="362" y1="333" x2="382" y2="333" stroke="#444" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#a2)"/>
+      <line x1="574" y1="333" x2="594" y2="333" stroke="#444" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#a2)"/>
+      <line x1="749" y1="333" x2="769" y2="333" stroke="#444" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#a2)"/>
+      <line x1="924" y1="333" x2="944" y2="333" stroke="#888" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#a2)"/>
+
+      <!-- ─ SCA → RAX feedback: Context Lens → Context Manager (zero-latency signal) ─ -->
+      <path d="M 671 294 L 671 248 L 292 248 L 292 234" stroke="#1a1a1a" stroke-width="1.5" fill="none" marker-end="url(#a1)"/>
+      <rect x="382" y="239" width="198" height="14" fill="#fff"/>
+      <text x="481" y="249" font-family="IBM Plex Mono,monospace" font-size="8" fill="#1a1a1a" text-anchor="middle">zero-latency signal injection</text>
+
+      <!-- ─ L2 → L4: Model Router dispatches to models ─ -->
+      <!-- vertical drop then horizontal spread -->
+      <path d="M 832 234 L 832 420 L 90 420 L 90 456" stroke="#1a1a1a" stroke-width="1.5" fill="none" marker-end="url(#a1)"/>
+      <text x="460" y="416" font-family="IBM Plex Mono,monospace" font-size="8" fill="#1a1a1a" text-anchor="middle">model dispatch (LiteLLM)</text>
+      <path d="M 200 420 L 200 456" stroke="#1a1a1a" stroke-width="1" fill="none" marker-end="url(#a2)" stroke-dasharray="3,3"/>
+      <path d="M 354 420 L 354 456" stroke="#888" stroke-width="1" fill="none" marker-end="url(#a2)" stroke-dasharray="3,3"/>
+      <path d="M 486 420 L 486 456" stroke="#888" stroke-width="1" fill="none" marker-end="url(#a2)" stroke-dasharray="3,3"/>
+      <line x1="90" y1="420" x2="486" y2="420" stroke="#888" stroke-width="1" stroke-dasharray="3,3"/>
+
+      <!-- Models → Router return -->
+      <path d="M 90 456 L 90 408 L 760 408 L 760 234" stroke="#888" stroke-width="1" stroke-dasharray="3,4" fill="none" marker-end="url(#a2)"/>
+      <text x="350" y="404" font-family="IBM Plex Mono,monospace" font-size="7.5" fill="#888" text-anchor="middle">inference response</text>
+
+      <!-- ─ SCA ↔ .said ─ -->
+      <path d="M 530 382 L 530 432 L 760 432 L 760 450" stroke="#1a1a1a" stroke-width="1.5" stroke-dasharray="5,3" fill="none" marker-end="url(#a2)"/>
+      <text x="650" y="427" font-family="IBM Plex Mono,monospace" font-size="8" fill="#444" text-anchor="middle">persist fingerprints</text>
+
+      <path d="M 893 450 L 893 438 L 560 438 L 560 382" stroke="#888" stroke-width="1" stroke-dasharray="3,4" fill="none" marker-end="url(#a2)"/>
+      <text x="720" y="434" font-family="IBM Plex Mono,monospace" font-size="7.5" fill="#888" text-anchor="middle">load · retrieve</text>
+
+      <!-- ─ L2/L3 → L6 Output ─ -->
+      <!-- Context Manager → Code Diff & Completion (via left side) -->
+      <path d="M 240 234 L 240 544 L 116 544 L 116 584" stroke="#1a1a1a" stroke-width="1.5" fill="none" marker-end="url(#a1)"/>
+      <path d="M 260 234 L 260 550 L 302 550 L 302 584" stroke="#1a1a1a" stroke-width="1" fill="none" marker-end="url(#a2)" stroke-dasharray="3,3"/>
+      <!-- Tool Executor → Agent Actions -->
+      <path d="M 472 234 L 472 544 L 488 544 L 488 584" stroke="#1a1a1a" stroke-width="1.5" fill="none" marker-end="url(#a1)"/>
+      <!-- Context Manager → Chat Panel -->
+      <path d="M 310 234 L 310 555 L 674 555 L 674 584" stroke="#888" stroke-width="1" stroke-dasharray="3,4" fill="none" marker-end="url(#a2)"/>
+      <!-- Evaluator → Diagnostics -->
+      <path d="M 1012 234 L 1012 560 L 860 560 L 860 584" stroke="#888" stroke-width="1" stroke-dasharray="3,4" fill="none" marker-end="url(#a2)"/>
+      <!-- SCA → Memory View -->
+      <path d="M 1018 372 L 1018 565 L 1067 565 L 1067 584" stroke="#555" stroke-width="1" stroke-dasharray="4,3" fill="none" marker-end="url(#a2)"/>
+
+    </svg>
+  </div>
+
+  <!-- COMPONENT TABLE -->
+  <table class="info-table">
+    <thead>
+      <tr>
+        <th style="width:120px">Layer</th>
+        <th style="width:200px">Component</th>
+        <th>Responsibility</th>
+        <th style="width:220px">Technology</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>Client</td><td>VS Code Extension</td><td>Primary developer IDE integration — LSP completions, Webview panels, IntelliSense</td><td>LSP · TypeScript · Webview API</td></tr>
+      <tr><td>Client</td><td>Web IDE</td><td>Browser-based editor with Monaco and full saidSo integration</td><td>React · Monaco Editor</td></tr>
+      <tr><td>Client</td><td>CLI / REPL</td><td>Command-line shell for direct RAX interaction and scripting</td><td>Python · saidSo shell</td></tr>
+      <tr><td>Client</td><td>API Client</td><td>Programmatic access via REST endpoints and real-time SSE streams</td><td>REST · WebSocket · SSE</td></tr>
+      <tr><td>Client</td><td>GitHub Copilot Shim</td><td>Drop-in compatibility bridge for existing Copilot-based workflows</td><td>OpenAI compat. shim</td></tr>
+      <tr><td>RAX Engine</td><td>API Gateway</td><td>Request ingress, authentication, rate-limiting, and LiteLLM proxy routing</td><td>FastAPI · LiteLLM</td></tr>
+      <tr><td>RAX Engine</td><td>Context Manager</td><td>Streaming context injection and multi-step LangGraph orchestration</td><td>LangGraph · Python</td></tr>
+      <tr><td>RAX Engine</td><td>Tool Executor</td><td>Executes bash, file I/O, and browser automation via MCP protocol</td><td>MCP · subprocess · Playwright</td></tr>
+      <tr><td>RAX Engine</td><td>Agent Scheduler</td><td>Plans and coordinates parallel multi-agent task graphs</td><td>LangGraph graph runtime</td></tr>
+      <tr><td>RAX Engine</td><td>Model Router</td><td>Routes requests to optimal model with cost and latency optimisation</td><td>LiteLLM · vLLM</td></tr>
+      <tr><td>SCA Core</td><td>Crystallizer</td><td>Converts token streams to 1-bit quantised holographic fingerprints</td><td>Custom SCA pipeline</td></tr>
+      <tr><td>SCA Core</td><td>Holographic Index</td><td>O(1) constant-time fingerprint lookup — replaces all vector databases</td><td>Custom in-memory index</td></tr>
+      <tr><td>SCA Core</td><td>Context Lens</td><td>Retrieves and injects crystalline signals into active context at zero latency</td><td>Custom SCA</td></tr>
+      <tr><td>SCA Core</td><td>Pattern Resonator</td><td>Matches code patterns and enforces semantic coherence across context</td><td>Custom SCA</td></tr>
+      <tr><td>Model Layer</td><td>vLLM / Ollama</td><td>Self-hosted local model inference — Qwen, Llama, DeepSeek, etc.</td><td>vLLM · Ollama</td></tr>
+      <tr><td>Model Layer</td><td>OpenAI / Claude API</td><td>Cloud model fallback via unified LiteLLM interface</td><td>OpenAI API · Anthropic API</td></tr>
+      <tr><td style="font-family:'IBM Plex Mono',monospace">.said</td><td style="font-family:'IBM Plex Mono',monospace">.said flat file</td><td>Sole persistence layer — handles all indexing, caching, and persistence via 1-bit holographic fingerprints. No database of any kind required.</td><td>Custom SCA flat file format</td></tr>
+      <tr><td>Output</td><td>Code Diff View</td><td>Inline diff presentation with accept / reject controls</td><td>Monaco diff · VS Code API</td></tr>
+      <tr><td>Output</td><td>Completion Stream</td><td>Real-time token streaming to editor and chat</td><td>SSE · WebSocket</td></tr>
+      <tr><td>Output</td><td>Agent Actions</td><td>Renders agentic file writes, shell execution, and browser control results</td><td>MCP · subprocess</td></tr>
+    </tbody>
+  </table>
+
+  <footer>
+    <span>.saidSo — SAID Research · Confidential</span>
+    <span>SCA Architecture · RAX Engine · Network Flow Diagram v1.0</span>
+  </footer>
+
+</div>
+</body>
+</html>

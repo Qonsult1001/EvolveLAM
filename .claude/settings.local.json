@@ -37,7 +37,9 @@
       "Grep",
       "Bash(*)",
       "WebFetch(domain:deepwiki.com)",
-      "WebSearch"
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:arxiv.org)"
     ],
     "defaultMode": "bypassPermissions"
   }
