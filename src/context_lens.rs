@@ -32,6 +32,11 @@ impl ContextLens {
         Self { graph, skills_dir }
     }
 
+    /// Access the underlying connection graph.
+    pub fn graph(&self) -> &ConnectionGraph {
+        &self.graph
+    }
+
     /// Query the brain for context relevant to the given input.
     /// Returns an InjectedContext with the formatted text and a relevance score.
     pub fn query(&self, input: &str) -> InjectedContext {
