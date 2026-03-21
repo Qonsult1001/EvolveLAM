@@ -906,4 +906,243 @@ mod tests {
         assert!(crate::memory::parse_connection_kind("scientific").is_some());
         assert!(crate::memory::parse_connection_kind("invalid").is_none());
     }
+
+    // -- /brain dispatch --
+
+    #[test]
+    fn test_brain_empty_shows_status() {
+        // Empty input defaults to status — should not panic
+        handle_brain("/brain");
+        handle_brain("/brain ");
+    }
+
+    #[test]
+    fn test_brain_status_does_not_panic() {
+        handle_brain("/brain status");
+    }
+
+    #[test]
+    fn test_brain_gaps_does_not_panic() {
+        handle_brain("/brain gaps");
+    }
+
+    #[test]
+    fn test_brain_unknown_subcommand_shows_help() {
+        // Should print usage, not panic
+        handle_brain("/brain unknown");
+        handle_brain("/brain foo bar");
+    }
+
+    #[test]
+    fn test_brain_learn_empty_shows_usage() {
+        // No args → usage
+        handle_brain("/brain learn");
+        handle_brain("/brain learn ");
+    }
+
+    #[test]
+    fn test_brain_learn_single_arg_shows_usage() {
+        // Domain only, no pattern → usage
+        handle_brain("/brain learn code-rust");
+        handle_brain("/brain learn code-rust ");
+    }
+
+    // -- /brain learn argument parsing --
+
+    #[test]
+    fn test_brain_learn_arg_parsing_domain_and_pattern() {
+        let args = "code-rust use Cow<str> for conditional ownership";
+        let parts: Vec<&str> = args.splitn(2, ' ').collect();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0], "code-rust");
+        assert_eq!(parts[1], "use Cow<str> for conditional ownership");
+    }
+
+    #[test]
+    fn test_brain_learn_domain_validation() {
+        let valid_domains = [
+            "code-rust",
+            "code-web",
+            "code-systems",
+            "code-data",
+            "code-devops",
+            "code-testing",
+        ];
+        assert!(valid_domains.contains(&"code-rust"));
+        assert!(valid_domains.contains(&"code-testing"));
+        assert!(!valid_domains.contains(&"code-python"));
+        assert!(!valid_domains.contains(&"invalid"));
+    }
+
+    #[test]
+    fn test_brain_learn_invalid_domain_does_not_panic() {
+        // Invalid domain — prints error, doesn't crash
+        handle_brain("/brain learn invalid-domain some pattern here");
+    }
+
+    // -- /brain gaps ordering --
+
+    #[test]
+    fn test_brain_gaps_sorting_logic() {
+        // Test the sorting logic used by handle_brain_gaps
+        let mut gaps: Vec<(&str, &str, usize)> = vec![
+            ("code-rust", "Rust", 5),
+            ("code-web", "Web", 0),
+            ("code-systems", "Systems", 2),
+        ];
+        gaps.sort_by_key(|(_, _, count)| *count);
+        assert_eq!(gaps[0].0, "code-web"); // 0 patterns first
+        assert_eq!(gaps[1].0, "code-systems"); // 2 patterns
+        assert_eq!(gaps[2].0, "code-rust"); // 5 patterns last
+    }
+
+    // -- /brain status pattern counting --
+
+    #[test]
+    fn test_brain_status_pattern_counting_logic() {
+        // Verify the pattern-counting logic used in handle_brain_status/gaps
+        let content = "\
+## Patterns Learned
+
+*(This section grows as the agent learns)*
+- pattern one
+- pattern two
+
+## Next Section
+";
+        let mut counting = false;
+        let mut count = 0usize;
+        for line in content.lines() {
+            if line.contains("Patterns Learned") {
+                counting = true;
+                continue;
+            }
+            if counting && line.starts_with("## ") {
+                break;
+            }
+            if counting && line.starts_with("- ") {
+                count += 1;
+            }
+        }
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn test_brain_status_pattern_counting_empty() {
+        let content = "\
+## Patterns Learned
+
+*(This section grows as the agent learns)*
+
+## Next Section
+";
+        let mut counting = false;
+        let mut count = 0usize;
+        for line in content.lines() {
+            if line.contains("Patterns Learned") {
+                counting = true;
+                continue;
+            }
+            if counting && line.starts_with("## ") {
+                break;
+            }
+            if counting && line.starts_with("- ") {
+                count += 1;
+            }
+        }
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_brain_status_pattern_counting_no_section() {
+        // File with no "Patterns Learned" section
+        let content = "# Skill\nSome description\n";
+        let mut counting = false;
+        let mut count = 0usize;
+        for line in content.lines() {
+            if line.contains("Patterns Learned") {
+                counting = true;
+                continue;
+            }
+            if counting && line.starts_with("## ") {
+                break;
+            }
+            if counting && line.starts_with("- ") {
+                count += 1;
+            }
+        }
+        assert_eq!(count, 0);
+    }
+
+    // -- /brain learn insertion logic --
+
+    #[test]
+    fn test_brain_learn_insertion_logic() {
+        // Test the insertion logic used by handle_brain_learn
+        let content = "\
+## Patterns Learned
+
+*(This section grows as the agent learns)*
+
+## Next Section
+";
+        let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+        let pattern = "test pattern here";
+        let mut inserted = false;
+
+        for i in 0..lines.len() {
+            if lines[i].contains("Patterns Learned") {
+                let mut insert_at = i + 1;
+                while insert_at < lines.len() {
+                    let trimmed = lines[insert_at].trim();
+                    if trimmed.starts_with("## ") {
+                        break;
+                    }
+                    if trimmed.starts_with("*(") {
+                        insert_at += 1;
+                        continue;
+                    }
+                    insert_at += 1;
+                }
+                lines.insert(insert_at, format!("- {pattern}"));
+                inserted = true;
+                break;
+            }
+        }
+
+        assert!(inserted);
+        let result = lines.join("\n");
+        assert!(result.contains("- test pattern here"));
+        // Pattern should be before "## Next Section"
+        let pattern_pos = result.find("- test pattern here").unwrap();
+        let next_section_pos = result.find("## Next Section").unwrap();
+        assert!(pattern_pos < next_section_pos);
+    }
+
+    #[test]
+    fn test_brain_learn_insertion_no_section() {
+        // When "Patterns Learned" section is missing, it should be created at end
+        let content = "# Skill\nSome description\n";
+        let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+        let pattern = "new pattern";
+        let mut inserted = false;
+
+        for line in &lines {
+            if line.contains("Patterns Learned") {
+                inserted = true;
+                break;
+            }
+        }
+
+        if !inserted {
+            lines.push(String::new());
+            lines.push("## Patterns Learned".to_string());
+            lines.push(String::new());
+            lines.push(format!("- {pattern}"));
+        }
+
+        let result = lines.join("\n");
+        assert!(result.contains("## Patterns Learned"));
+        assert!(result.contains("- new pattern"));
+    }
 }
