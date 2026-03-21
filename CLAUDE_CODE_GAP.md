@@ -1,6 +1,6 @@
 # Gap Analysis: yoyo vs Claude Code
 
-Last updated: Day 19 (2026-03-19)
+Last updated: Day 21 (2026-03-21)
 
 This document tracks the feature gap between yoyo and Claude Code, used to inform development priorities when there are no community issues to address.
 
@@ -86,7 +86,9 @@ This document tracks the feature gap between yoyo and Claude Code, used to infor
 | PR description generation | ✅ | ✅ | `/pr create [--draft]` generates AI-powered PR descriptions |
 | Commit message generation | ✅ | ✅ | `/commit` with heuristic-based message generation from staged diff (Day 8) |
 | Code review | ✅ | ✅ | `/review` provides AI-powered code review of staged/unstaged changes (Day 13) |
-| Multi-file refactoring | 🟡 | ✅ | yoyo can via tools + `/coupling` shows module and function-level dependencies; Claude Code is better at coordinating |
+| Multi-file refactoring | ✅ | ✅ | `/refactor` builds coordinated multi-file prompts with coupling analysis, function cross-refs, and source previews (Day 20) |
+| Web research | ✅ | ❌ | `/research` fetches web results via DuckDuckGo Lite, strips HTML, optionally saves to RESEARCH.md (Day 20) |
+| Knowledge brain | ✅ | ❌ | `/brain status/gaps/learn` — 6 domain skills, connection graph, pattern tracking; auto-wired into /evolve cycle (Day 20) |
 
 ## Configuration
 
@@ -115,11 +117,18 @@ This document tracks the feature gap between yoyo and Claude Code, used to infor
 
 Based on this analysis, the highest-impact missing features are:
 
-1. **Multi-file refactoring coordination** — Better cross-file change orchestration
-2. **Deep file coupling integration** — Wire function-level refs into refactoring decisions
+1. **Active brain context injection** — Brain patterns should feed into active reasoning context (like SCA Context Lens in target architecture)
+2. **Multi-model routing** — Support local models (vLLM/Ollama) alongside cloud APIs via unified dispatch
+3. **API gateway / VS Code extension** — Enable non-CLI client interfaces
 
 Recently completed:
 
+- ✅ `/refactor` multi-file refactoring (Day 20) — coordinated prompts with coupling analysis and cross-refs
+- ✅ `/research` web search (Day 20) — DuckDuckGo Lite integration with HTML stripping
+- ✅ `/brain` knowledge system (Day 20) — status/gaps/learn subcommands, 6 domain skills, auto-wired into /evolve
+- ✅ Runtime error throttling (Day 20) — escalating dedup windows (2s→30s→5min) to prevent noise
+- ✅ Brain/research tests (Day 21) — 34 new tests for /brain, /research, /refactor commands
+- ✅ SESSION_START_SHA fix (Day 21) — unbound variable in evolve-ide.sh finish phase
 - ✅ `/changelog` command (Day 19) — git log grouped by day for release notes
 - ✅ `/gap` live stats (Day 19) — auto-counts tests, files, commands from source
 - ✅ `/timing` command (Day 19) — session duration history from JSONL data
