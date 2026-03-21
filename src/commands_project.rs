@@ -4517,4 +4517,44 @@ mod tests {
         assert!(!save);
         assert_eq!(query, "rust async patterns");
     }
+
+    // -- /refactor --
+
+    #[test]
+    fn test_refactor_empty_input_returns_none() {
+        assert!(handle_refactor("/refactor").is_none());
+        assert!(handle_refactor("/refactor ").is_none());
+        assert!(handle_refactor("/refactor  ").is_none());
+    }
+
+    #[test]
+    fn test_refactor_valid_input_returns_some() {
+        let result = handle_refactor("/refactor rename foo to bar");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_refactor_prompt_contains_description() {
+        let result = handle_refactor("/refactor extract error handling into module").unwrap();
+        assert!(result.contains("extract error handling into module"));
+    }
+
+    #[test]
+    fn test_refactor_prompt_contains_coupling_section() {
+        let result = handle_refactor("/refactor rename foo to bar").unwrap();
+        assert!(result.contains("File Coupling Analysis"));
+    }
+
+    #[test]
+    fn test_refactor_prompt_contains_cross_ref_section() {
+        let result = handle_refactor("/refactor rename foo to bar").unwrap();
+        assert!(result.contains("Function Cross-References"));
+    }
+
+    #[test]
+    fn test_refactor_prompt_contains_instructions() {
+        let result = handle_refactor("/refactor rename foo to bar").unwrap();
+        assert!(result.contains("coordinated refactoring"));
+        assert!(result.contains("cargo fmt"));
+    }
 }
