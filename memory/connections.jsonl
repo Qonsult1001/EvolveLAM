@@ -65,3 +65,10 @@
 {"from": "protected_files", "to": "verify_task_revert", "weight": 0.1, "activations": 1, "last_activated": "2026-03-20T13:16:19Z", "kind": "causal"}
 {"from": "research_capability", "to": "internet_access", "weight": 0.1, "activations": 1, "last_activated": "2026-03-20T13:16:19Z", "kind": "semantic"}
 {"from": "connection_graph", "to": "scientific_learning", "weight": 0.1, "activations": 1, "last_activated": "2026-03-20T13:16:19Z", "kind": "semantic"}
+{"from": "test_design", "to": "command_dispatch", "weight": 0.1, "activations": 1, "last_activated": "2026-03-21T16:00:00Z", "kind": "causal"}
+{"from": "html_parsing", "to": "web_research", "weight": 0.1, "activations": 1, "last_activated": "2026-03-21T16:00:00Z", "kind": "semantic"}
+{"from": "url_encoding", "to": "web_research", "weight": 0.1, "activations": 1, "last_activated": "2026-03-21T16:00:00Z", "kind": "causal"}
+{"from": "brain_knowledge_system", "to": "domain_skills", "weight": 0.1, "activations": 1, "last_activated": "2026-03-21T16:00:00Z", "kind": "causal"}
+{"from": "set_nounset", "to": "bash_safety", "weight": 0.1, "activations": 1, "last_activated": "2026-03-21T16:00:00Z", "kind": "semantic"}
+{"from": "sca_architecture", "to": "brain_knowledge_system", "weight": 0.1, "activations": 1, "last_activated": "2026-03-21T16:00:00Z", "kind": "scientific"}
+{"from": "entropy_weighted_learning", "to": "task_selection", "weight": 0.1, "activations": 1, "last_activated": "2026-03-21T16:00:00Z", "kind": "scientific"}

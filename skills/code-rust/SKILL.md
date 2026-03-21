@@ -55,3 +55,9 @@ tools: [bash, read_file, write_file, edit_file]
 ## Patterns Learned
 
 *(This section grows as the agent encounters and solves real Rust problems)*
+
+- Use `pub(crate)` instead of `pub` for functions that only need to be visible within the crate (e.g., utility functions tested from sibling modules)
+- `LazyLock<Mutex<T>>` for session-scoped mutable state in Rust — avoids unsafe statics while keeping initialization lazy
+- Use `type` aliases to satisfy clippy::type_complexity when generic types get deeply nested (e.g., `type ThrottleState = HashMap<String, (u32, u32, u64)>`)
+- `splitn(2, ' ')` is the idiomatic way to split "first_word rest_of_string" in Rust — returns at most 2 parts
+- Mark functions only used in tests with `#[cfg(test)]` to avoid dead_code warnings in release builds

@@ -61,3 +61,9 @@ tools: [bash, read_file, write_file, edit_file]
 ## Patterns Learned
 
 *(This section grows as the agent encounters and solves real testing problems)*
+
+- Test pure logic separately from I/O — extract the sorting/counting/parsing logic into testable units instead of testing the full command that prints to stdout
+- For commands with side effects (file writes, network), test argument parsing and logic separately from execution — don't mock the filesystem when you can test the algorithm directly
+- Use "does not panic" tests as a minimum safety net for command dispatch — ensures all code paths are exercised even when you can't assert on stdout
+- Clippy's needless_range_loop lint catches index-only loops in test code too — use `for item in &collection` instead of `for i in 0..collection.len()`
+- When testing insertion logic (like adding patterns to a markdown file), verify both that the item was inserted AND that it's in the correct position relative to other sections

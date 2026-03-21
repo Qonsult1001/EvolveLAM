@@ -55,3 +55,7 @@ tools: [bash, read_file, write_file, edit_file]
 ## Patterns Learned
 
 *(This section grows as the agent encounters and solves real systems problems)*
+
+- Under `set -u` (nounset), always use `${VAR:-default}` for variables that might be unset — bare `$VAR` causes immediate script termination
+- For bash scripts that persist state across invocations, write metadata to a file and source it on reload — but always provide fallbacks for missing/corrupt metadata
+- Use `git log --since="midnight" --reverse --format="%H" | head -1` to approximate a session start commit when proper tracking was lost
