@@ -52,6 +52,8 @@ mod prompt;
 mod repl;
 #[allow(dead_code)]
 mod router;
+#[allow(dead_code)]
+mod said;
 mod serve;
 
 use cli::*;
