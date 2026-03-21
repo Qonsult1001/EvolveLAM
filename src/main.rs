@@ -50,6 +50,8 @@ mod ide_bridge;
 mod memory;
 mod prompt;
 mod repl;
+#[allow(dead_code)]
+mod router;
 mod serve;
 
 use cli::*;
