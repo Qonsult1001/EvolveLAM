@@ -737,6 +737,16 @@ print(json.dumps(entry))
 phase_finish() {
     load_metadata
 
+    # Ensure SESSION_START_SHA is set even if metadata.sh is missing or incomplete
+    if [ -z "${SESSION_START_SHA:-}" ]; then
+        # Approximate: use the first commit of today, or 10 commits back, whichever is more recent
+        SESSION_START_SHA=$(git log --since="midnight" --reverse --format="%H" | head -1 || true)
+        if [ -z "$SESSION_START_SHA" ]; then
+            SESSION_START_SHA=$(git rev-parse HEAD~10 2>/dev/null || git rev-parse HEAD)
+        fi
+        echo "  ⚠ SESSION_START_SHA was unset — inferred: ${SESSION_START_SHA:0:8}"
+    fi
+
     echo "→ Finishing session..."
     echo ""
 
