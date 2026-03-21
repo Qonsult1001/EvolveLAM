@@ -1,0 +1,31 @@
+{"day": 19, "task_num": 1, "title": "Wire timing and outcome data into evolve-ide.sh", "outcome": "verified"}
+{"day": 19, "task_num": 2, "title": "Add /changelog command for git log summary", "outcome": "verified"}
+{"day": 19, "task_num": 3, "title": "Fix stale GRAPH_SUBCOMMANDS \u2014 add missing \"similar\" entry", "outcome": "verified"}
+{"day": 19, "task_num": 4, "title": "Update CLAUDE_CODE_GAP.md with live stats", "outcome": "verified"}
+{"day": 19, "task_num": 5, "title": "Add /blame command for quick git blame", "outcome": "verified"}
+{"day": 19, "task_num": 1, "title": "Add runtime error logging to prompt.rs", "outcome": "verified"}
+{"day": 19, "task_num": 2, "title": "Add /runtime-errors command to review runtime failures", "outcome": "verified"}
+{"day": 19, "task_num": 3, "title": "Skip binary files in read_file tool", "outcome": "verified"}
+{"day": 19, "task_num": 4, "title": "Fix list_files tool on current directory", "outcome": "verified"}
+{"day": 19, "task_num": 5, "title": "Feed runtime errors into evolution planning", "outcome": "verified"}
+{"day": 19, "task_num": 1, "title": "Fix duplicate runtime error logging", "outcome": "verified"}
+{"day": 19, "task_num": 2, "title": "Runtime error pattern detection", "outcome": "verified"}
+{"day": 19, "task_num": 3, "title": "`/runtime-errors` subcommands (clear, summary)", "outcome": "verified"}
+{"day": 19, "task_num": 4, "title": "Deduplicate runtime error messages before logging", "outcome": "verified"}
+{"day": 19, "task_num": 5, "title": "Wire runtime error patterns into evolution planning prompt", "outcome": "verified"}
+{"day": 19, "task_num": 1, "title": "Fix and verify enhanced /init implementation", "outcome": "verified"}
+{"day": 19, "task_num": 2, "title": "Add /health endpoint to serve mode", "outcome": "verified"}
+{"day": 19, "task_num": 3, "title": "Serve mode conversation isolation", "outcome": "verified"}
+{"day": 19, "task_num": 4, "title": "Wire /init to read actual file contents for external projects", "outcome": "verified"}
+{"day": 19, "task_num": 5, "title": "Improve runtime error handling for connection failures", "outcome": "verified"}
+{"day": 20, "task_num": 1, "title": "Fix panic in feedback.rs \u2014 replace with proper error handling", "outcome": "reverted"}
+{"day": 20, "task_num": 1, "title": "Add EVOLVE_ALLOW_PROTECTED bypass to evolve-ide.sh verify-task", "outcome": "verified"}
+{"day": 20, "task_num": 2, "title": "Add runtime error auto-throttling \u2014 suppress repeated identical errors", "outcome": "verified"}
+{"day": 20, "task_num": 3, "title": "Add /refactor command for coordinated multi-file changes", "outcome": "verified"}
+{"day": 20, "task_num": 4, "title": "Implement /research command for in-REPL web research", "outcome": "verified"}
+{"day": 20, "task_num": 5, "title": "Add /brain command \u2014 query and grow the knowledge system", "outcome": "verified"}
+{"day": 21, "task_num": 1, "title": "Add tests for /brain command \u2014 status, gaps, learn subcommands", "outcome": "verified"}
+{"day": 21, "task_num": 2, "title": "Add tests for /research command \u2014 query building, HTML stripping, URL encoding", "outcome": "verified"}
+{"day": 21, "task_num": 3, "title": "Add tests for /refactor command \u2014 prompt construction and empty input handling", "outcome": "verified"}
+{"day": 21, "task_num": 4, "title": "Fix SESSION_START_SHA unbound variable in evolve-ide.sh finish", "outcome": "verified"}
+{"day": 21, "task_num": 5, "title": "Update gap analysis for Day 20 work", "outcome": "verified"}

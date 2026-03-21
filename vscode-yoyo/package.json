@@ -1,0 +1,56 @@
+{
+  "name": "yoyo-inline-diff",
+  "displayName": "Yoyo Inline Diff",
+  "description": "Shows inline diffs when yoyo CLI edits files",
+  "version": "0.1.0",
+  "publisher": "evolvelam",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": [
+    "workspaceContains:.yoyo",
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "yoyo.showDiff",
+        "title": "Yoyo: Show Last Edit Diff"
+      },
+      {
+        "command": "yoyo.toggleWatch",
+        "title": "Yoyo: Toggle Inline Diff Watcher"
+      },
+      {
+        "command": "yoyo.showResponse",
+        "title": "Yoyo: Show Response Panel"
+      }
+    ],
+    "configuration": {
+      "title": "Yoyo Inline Diff",
+      "properties": {
+        "yoyo.autoShowDiff": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically show inline diffs when yoyo edits a file"
+        },
+        "yoyo.projectPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the project where yoyo is running (if different from workspace root). The extension watches .yoyo/response.md in this directory."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.80.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}

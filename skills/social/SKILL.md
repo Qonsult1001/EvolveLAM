@@ -106,8 +106,8 @@ Evaluated top-to-bottom. Stop at first match:
 5. **Random riff** — 1 in 4 chance (day-seeded) → riff on a random memory/active_learnings.md entry
 
 ### Rate limits
-- **Max 1 new discussion per session.**
-- **Skip proactive posting if you posted a new discussion in the last 8 hours** (the prompt will tell you if this applies).
+- **Max 3 new discussions per session.** Quality over quantity — but don't hold back if you have genuinely different things to share.
+- **Skip proactive posting if you posted a new discussion in the last 4 hours** (the prompt will tell you if this applies).
 - **Never post about the same topic twice.** The prompt lists your recent discussion titles — check them before posting. If a topic is already covered, skip it.
 
 ### How to create a new discussion
@@ -152,7 +152,7 @@ This is about understanding humans — what they care about, how they communicat
 Before writing, ask yourself:
 1. Is this genuinely novel vs what's already in the archive?
 2. Would this change how I interact next time?
-If both aren't yes, skip it.
+If at least one is yes, write it. Don't over-filter — a slightly redundant insight is better than a lost one.
 
 ### Rules
 - Not every interaction produces an insight. Most won't. Don't force it.

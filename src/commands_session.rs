@@ -1,5 +1,5 @@
 //! Session-related command handlers: /save, /load, /compact, /history, /search,
-//! /mark, /jump, /marks, /spawn.
+//! /mark, /jump, /marks, /spawn, /stats, /confidence.
 
 use crate::format::*;
 use crate::prompt::*;
@@ -209,6 +209,39 @@ pub fn handle_search(agent: &Agent, input: &str) {
 /// Storage for conversation bookmarks: named snapshots of the message list.
 pub type Bookmarks = HashMap<String, String>;
 
+/// Path to the bookmarks persistence file.
+const BOOKMARKS_FILE: &str = ".yoyo/bookmarks.json";
+
+/// Load bookmarks from `.yoyo/bookmarks.json`.
+/// Returns empty if file doesn't exist or can't be parsed.
+pub fn load_bookmarks() -> Bookmarks {
+    load_bookmarks_from(std::path::Path::new(BOOKMARKS_FILE))
+}
+
+/// Load bookmarks from a specific path (for testing).
+pub fn load_bookmarks_from(path: &std::path::Path) -> Bookmarks {
+    match std::fs::read_to_string(path) {
+        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+        Err(_) => Bookmarks::new(),
+    }
+}
+
+/// Save bookmarks to `.yoyo/bookmarks.json`.
+/// Creates the `.yoyo/` directory if needed.
+pub fn save_bookmarks(bookmarks: &Bookmarks) -> Result<(), String> {
+    save_bookmarks_to(bookmarks, std::path::Path::new(BOOKMARKS_FILE))
+}
+
+/// Save bookmarks to a specific path (for testing).
+pub fn save_bookmarks_to(bookmarks: &Bookmarks, path: &std::path::Path) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {e}"))?;
+    }
+    let json =
+        serde_json::to_string_pretty(bookmarks).map_err(|e| format!("Serialization error: {e}"))?;
+    std::fs::write(path, json).map_err(|e| format!("Failed to write bookmarks: {e}"))
+}
+
 /// Parse the bookmark name from `/mark <name>` input.
 /// Returns None if no name is provided.
 pub fn parse_bookmark_name(input: &str, prefix: &str) -> Option<String> {
@@ -241,6 +274,10 @@ pub fn handle_mark(agent: &Agent, input: &str, bookmarks: &mut Bookmarks) {
                 println!("{GREEN}  ✓ bookmark '{name}' updated ({msg_count} messages){RESET}\n");
             } else {
                 println!("{GREEN}  ✓ bookmark '{name}' saved ({msg_count} messages){RESET}\n");
+            }
+            // Auto-persist to disk
+            if let Err(e) = save_bookmarks(bookmarks) {
+                eprintln!("{DIM}  (bookmark save warning: {e}){RESET}");
             }
         }
         Err(e) => eprintln!("{RED}  error saving bookmark: {e}{RESET}\n"),
@@ -298,75 +335,1160 @@ pub fn handle_marks(bookmarks: &Bookmarks) {
 
 // ── /spawn ────────────────────────────────────────────────────────────────
 
-/// Parse the task from a `/spawn <task>` input.
-/// Returns None if no task is provided.
-pub fn parse_spawn_task(input: &str) -> Option<String> {
-    let task = input
-        .strip_prefix("/spawn")
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    if task.is_empty() {
-        None
-    } else {
-        Some(task)
+/// A completed spawn record for history tracking.
+#[derive(Debug, Clone)]
+pub struct SpawnRecord {
+    pub id: usize,
+    pub task: String,
+    pub result: String,
+    pub timestamp: String,
+}
+
+/// Spawn history — tracks all completed subagent runs in this session.
+pub struct SpawnHistory {
+    records: Vec<SpawnRecord>,
+}
+
+impl SpawnHistory {
+    pub fn new() -> Self {
+        Self {
+            records: Vec::new(),
+        }
     }
+
+    pub fn add(&mut self, task: String, result: String) -> usize {
+        let id = self.records.len() + 1;
+        let timestamp = simple_time_stamp();
+        self.records.push(SpawnRecord {
+            id,
+            task,
+            result,
+            timestamp,
+        });
+        id
+    }
+
+    pub fn get(&self, id: usize) -> Option<&SpawnRecord> {
+        self.records.iter().find(|r| r.id == id)
+    }
+
+    pub fn len(&self) -> usize {
+        self.records.len()
+    }
+
+    /// Format all records for display.
+    pub fn format_list(&self) -> String {
+        if self.records.is_empty() {
+            return "  No spawns this session.\n".to_string();
+        }
+        let mut out = String::new();
+        out.push_str(&format!(
+            "  {} spawn(s) this session:\n",
+            self.records.len()
+        ));
+        for r in &self.records {
+            let task_preview = crate::format::truncate_with_ellipsis(&r.task, 60);
+            let result_preview = crate::format::truncate_with_ellipsis(
+                r.result.lines().next().unwrap_or("(empty)"),
+                50,
+            );
+            out.push_str(&format!(
+                "  #{} [{}] {}\n     → {}\n",
+                r.id, r.timestamp, task_preview, result_preview
+            ));
+        }
+        out
+    }
+
+    /// Aggregate results from multiple spawns into a summary.
+    pub fn aggregate(&self, ids: &[usize]) -> String {
+        let mut out = String::new();
+        let records: Vec<_> = ids.iter().filter_map(|id| self.get(*id)).collect();
+        if records.is_empty() {
+            return "(no matching spawn results)".to_string();
+        }
+        for r in &records {
+            out.push_str(&format!("## Spawn #{}: {}\n{}\n\n", r.id, r.task, r.result));
+        }
+        out
+    }
+}
+
+/// Simple HH:MM timestamp without chrono dependency.
+fn simple_time_stamp() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let hours = (now % 86400) / 3600;
+    let minutes = (now % 3600) / 60;
+    format!("{hours:02}:{minutes:02}")
+}
+
+/// Parsed /spawn subcommand.
+#[derive(Debug, PartialEq)]
+pub enum SpawnCommand {
+    Help,
+    List,
+    ShowResult(usize),
+    Task(String),
+}
+
+/// Parse spawn subcommand: `/spawn list`, `/spawn result <id>`, or `/spawn <task>`.
+pub fn parse_spawn_subcommand(input: &str) -> SpawnCommand {
+    let rest = input.strip_prefix("/spawn").unwrap_or("").trim();
+    if rest == "list" || rest == "ls" {
+        SpawnCommand::List
+    } else if let Some(id_str) = rest.strip_prefix("result ").or(rest.strip_prefix("show ")) {
+        if let Ok(id) = id_str.trim().parse::<usize>() {
+            SpawnCommand::ShowResult(id)
+        } else {
+            SpawnCommand::Task(rest.to_string())
+        }
+    } else if rest.is_empty() {
+        SpawnCommand::Help
+    } else {
+        SpawnCommand::Task(rest.to_string())
+    }
+}
+
+/// Display spawn help.
+pub fn print_spawn_help() {
+    println!("{DIM}  usage: /spawn <task>          Run task in fresh subagent context");
+    println!("         /spawn list             Show completed spawns this session");
+    println!("         /spawn result <id>      Show full result of spawn #id");
+    println!("  Example: /spawn read src/main.rs and summarize the architecture{RESET}\n");
 }
 
 /// Handle the /spawn command: create a fresh subagent, run a task, and return the result.
 /// The subagent gets its own independent context window so complex tasks don't pollute
-/// the main conversation.
+/// the main conversation. Now with history tracking and subcommands.
 /// Returns Some(context_msg) to be injected back into the main conversation, or None.
 pub async fn handle_spawn(
     input: &str,
     agent_config: &crate::AgentConfig,
     session_total: &mut Usage,
     model: &str,
+    history: &mut SpawnHistory,
 ) -> Option<String> {
-    let task = match parse_spawn_task(input) {
-        Some(t) => t,
-        None => {
-            println!("{DIM}  usage: /spawn <task>");
-            println!("  Spawn a subagent with a fresh context to handle a task.");
-            println!("  The result is summarized back into your main conversation.");
-            println!("  Example: /spawn read src/main.rs and summarize the architecture{RESET}\n");
-            return None;
+    match parse_spawn_subcommand(input) {
+        SpawnCommand::Help => {
+            print_spawn_help();
+            None
         }
+        SpawnCommand::List => {
+            let display = history.format_list();
+            println!("{DIM}{display}{RESET}\n");
+            None
+        }
+        SpawnCommand::ShowResult(id) => {
+            if id == 0 {
+                // /spawn result 0 → show all aggregated
+                let all_ids: Vec<usize> = (1..=history.len()).collect();
+                let agg = history.aggregate(&all_ids);
+                println!("{agg}");
+            } else if let Some(record) = history.get(id) {
+                println!("{DIM}  Spawn #{}: {}{RESET}", record.id, record.task);
+                println!("{DIM}  Completed: {}{RESET}\n", record.timestamp);
+                println!("{}", record.result);
+            } else {
+                println!(
+                    "{DIM}  No spawn with id #{id}. Use /spawn list to see available.{RESET}\n"
+                );
+            }
+            None
+        }
+        SpawnCommand::Task(task) => {
+            println!(
+                "{CYAN}  🐙 spawning subagent #{}...{RESET}",
+                history.len() + 1
+            );
+            println!(
+                "{DIM}  task: {}{RESET}",
+                crate::format::truncate_with_ellipsis(&task, 100)
+            );
+
+            // Build a fresh agent with the same config but independent context
+            let mut sub_agent = agent_config.build_agent();
+
+            // Run the task as a single prompt on the subagent
+            let response = run_prompt(&mut sub_agent, &task, session_total, model, None).await;
+
+            let result_text = if response.trim().is_empty() {
+                "(no output)".to_string()
+            } else {
+                response.trim().to_string()
+            };
+
+            let id = history.add(task.clone(), result_text.clone());
+
+            println!("\n{GREEN}  ✓ subagent #{id} completed{RESET}");
+            println!("{DIM}  injecting result into main conversation...{RESET}");
+            println!("{DIM}  use /spawn result {id} to see full output later{RESET}\n");
+
+            let context_msg = format!(
+                "Subagent #{id} just completed a task. Here is its result:\n\n**Task:** {task}\n\n**Result:**\n{result_text}"
+            );
+
+            Some(context_msg)
+        }
+    }
+}
+
+// ── /stats ──────────────────────────────────────────────────────────────
+
+/// Parse JOURNAL.md to extract session stats: number of sessions per day, task counts.
+pub fn parse_journal_stats(content: &str) -> JournalStats {
+    let mut stats = JournalStats {
+        total_sessions: 0,
+        sessions_by_day: Vec::new(),
+        total_tests_mentioned: 0,
+        test_counts_by_session: Vec::new(),
+        revert_sessions: 0,
+        task_sessions: 0,
     };
 
-    println!("{CYAN}  🐙 spawning subagent...{RESET}");
-    println!(
-        "{DIM}  task: {}{RESET}",
-        crate::format::truncate_with_ellipsis(&task, 100)
-    );
+    let mut current_day: Option<u32> = None;
+    let mut day_sessions: u32 = 0;
+    let mut session_has_revert = false;
+    let mut session_has_task = false;
+    let mut session_test_count: Option<u32> = None;
 
-    // Build a fresh agent with the same config but independent context
-    let mut sub_agent = agent_config.build_agent();
+    for line in content.lines() {
+        // Match "## Day N" headers
+        if let Some(rest) = line.strip_prefix("## Day ") {
+            // Flush previous session data
+            if current_day.is_some() {
+                if session_has_revert {
+                    stats.revert_sessions += 1;
+                }
+                if session_has_task {
+                    stats.task_sessions += 1;
+                }
+                if let (Some(day), Some(tc)) = (current_day, session_test_count) {
+                    stats.test_counts_by_session.push((day, tc));
+                }
+            }
+            session_has_revert = false;
+            session_has_task = false;
+            session_test_count = None;
 
-    // Run the task as a single prompt on the subagent
-    let response = run_prompt(&mut sub_agent, &task, session_total, model).await;
+            if let Some(day_num) = rest
+                .split(|c: char| !c.is_ascii_digit())
+                .next()
+                .and_then(|s| s.parse::<u32>().ok())
+            {
+                if let Some(prev_day) = current_day {
+                    if prev_day != day_num && day_sessions > 0 {
+                        stats.sessions_by_day.push((prev_day, day_sessions));
+                        day_sessions = 0;
+                    }
+                }
+                current_day = Some(day_num);
+                stats.total_sessions += 1;
+                day_sessions += 1;
+            }
+        }
 
-    println!("\n{GREEN}  ✓ subagent completed{RESET}");
-    println!("{DIM}  injecting result into main conversation...{RESET}\n");
+        let lower = line.to_lowercase();
 
-    // Build a context message for the main agent summarizing what the subagent did
-    let result_text = if response.trim().is_empty() {
-        "(no output)".to_string()
+        // Track reverts and tasks (exclude "zero reverts", "no reverts", "0 reverts")
+        if lower.contains("revert")
+            && !lower.contains("zero revert")
+            && !lower.contains("no revert")
+            && !lower.contains("0 revert")
+        {
+            session_has_revert = true;
+        }
+        if lower.contains("task") {
+            session_has_task = true;
+        }
+
+        // Count test mentions like "N unit tests" or "N tests"
+        if let Some(idx) = line.find(" unit test") {
+            let before = &line[..idx];
+            let num_str: String = before
+                .chars()
+                .rev()
+                .take_while(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .chars()
+                .rev()
+                .collect();
+            if let Ok(num) = num_str.parse::<u32>() {
+                stats.total_tests_mentioned = stats.total_tests_mentioned.max(num);
+                session_test_count = Some(num);
+            }
+        }
+    }
+    // Flush last session
+    if current_day.is_some() {
+        if session_has_revert {
+            stats.revert_sessions += 1;
+        }
+        if session_has_task {
+            stats.task_sessions += 1;
+        }
+        if let (Some(day), Some(tc)) = (current_day, session_test_count) {
+            stats.test_counts_by_session.push((day, tc));
+        }
+    }
+    // Push the last day
+    if let Some(day) = current_day {
+        if day_sessions > 0 {
+            stats.sessions_by_day.push((day, day_sessions));
+        }
+    }
+
+    stats
+}
+
+/// Compute a simple linear trend from a sequence of values.
+/// Returns (slope, direction_label). Positive slope = improving, negative = declining.
+pub fn compute_trend(values: &[f64]) -> (f64, &'static str) {
+    if values.len() < 2 {
+        return (0.0, "insufficient data");
+    }
+    let n = values.len() as f64;
+    let sum_x: f64 = (0..values.len()).map(|i| i as f64).sum();
+    let sum_y: f64 = values.iter().sum();
+    let sum_xy: f64 = values.iter().enumerate().map(|(i, y)| i as f64 * y).sum();
+    let sum_x2: f64 = (0..values.len()).map(|i| (i as f64) * (i as f64)).sum();
+
+    let denom = n * sum_x2 - sum_x * sum_x;
+    if denom.abs() < f64::EPSILON {
+        return (0.0, "flat");
+    }
+    let slope = (n * sum_xy - sum_x * sum_y) / denom;
+
+    let label = if slope > 0.5 {
+        "improving"
+    } else if slope < -0.5 {
+        "declining"
     } else {
-        response.trim().to_string()
+        "stable"
+    };
+    (slope, label)
+}
+
+/// Stats extracted from JOURNAL.md.
+#[derive(Debug, Clone, PartialEq)]
+pub struct JournalStats {
+    pub total_sessions: u32,
+    pub sessions_by_day: Vec<(u32, u32)>,
+    pub total_tests_mentioned: u32,
+    /// Test counts extracted per session: (day, test_count).
+    pub test_counts_by_session: Vec<(u32, u32)>,
+    /// Count of sessions that mention "revert" (case-insensitive).
+    pub revert_sessions: u32,
+    /// Count of sessions that mention "task" (rough measure of tasks attempted).
+    pub task_sessions: u32,
+}
+
+/// Format the /stats display output.
+pub fn format_stats_display(journal_stats: &JournalStats, error_content: &str) -> String {
+    let mut out = String::new();
+
+    out.push_str("  Session Statistics:\n");
+    out.push_str(&format!(
+        "    Total sessions: {}\n",
+        journal_stats.total_sessions
+    ));
+
+    if !journal_stats.sessions_by_day.is_empty() {
+        let total_days = journal_stats.sessions_by_day.len();
+        let avg = journal_stats.total_sessions as f64 / total_days as f64;
+        out.push_str(&format!("    Days active: {}\n", total_days));
+        out.push_str(&format!("    Avg sessions/day: {:.1}\n", avg));
+
+        // Most productive day
+        if let Some((day, count)) = journal_stats.sessions_by_day.iter().max_by_key(|(_, c)| c) {
+            out.push_str(&format!(
+                "    Most productive: Day {} ({} sessions)\n",
+                day, count
+            ));
+        }
+    }
+
+    if journal_stats.total_tests_mentioned > 0 {
+        out.push_str(&format!(
+            "    Peak test count: {}\n",
+            journal_stats.total_tests_mentioned
+        ));
+    }
+
+    // Convergence metrics
+    if journal_stats.total_sessions > 1 {
+        out.push_str("\n  Convergence:\n");
+
+        // Revert rate
+        let revert_rate = if journal_stats.total_sessions > 0 {
+            journal_stats.revert_sessions as f64 / journal_stats.total_sessions as f64 * 100.0
+        } else {
+            0.0
+        };
+        out.push_str(&format!(
+            "    Revert rate: {}/{} sessions ({:.0}%)\n",
+            journal_stats.revert_sessions, journal_stats.total_sessions, revert_rate
+        ));
+
+        // Test count trend
+        if journal_stats.test_counts_by_session.len() >= 2 {
+            let test_values: Vec<f64> = journal_stats
+                .test_counts_by_session
+                .iter()
+                .map(|(_, tc)| *tc as f64)
+                .collect();
+            let (slope, label) = compute_trend(&test_values);
+            out.push_str(&format!(
+                "    Test growth: {} ({:+.1} tests/session)\n",
+                label, slope
+            ));
+        }
+
+        // Sessions per day trend
+        if journal_stats.sessions_by_day.len() >= 2 {
+            let day_values: Vec<f64> = journal_stats
+                .sessions_by_day
+                .iter()
+                .map(|(_, count)| *count as f64)
+                .collect();
+            let (_, label) = compute_trend(&day_values);
+            out.push_str(&format!("    Activity trend: {}\n", label));
+        }
+
+        // Overall convergence score (simple heuristic)
+        let test_growing = journal_stats.test_counts_by_session.len() >= 2 && {
+            let vals: Vec<f64> = journal_stats
+                .test_counts_by_session
+                .iter()
+                .map(|(_, tc)| *tc as f64)
+                .collect();
+            compute_trend(&vals).0 > 0.0
+        };
+        let low_revert = revert_rate < 30.0;
+        let score = (if test_growing { 1 } else { 0 }) + (if low_revert { 1 } else { 0 });
+        let verdict = match score {
+            2 => "converging",
+            1 => "mixed signals",
+            _ => "needs attention",
+        };
+        out.push_str(&format!("    Verdict: {}\n", verdict));
+    }
+
+    // Error stats
+    let error_entries = crate::commands_project::parse_error_log(error_content);
+    if !error_entries.is_empty() {
+        let totals = crate::commands_project::summarize_error_log(&error_entries);
+        let grand_total: usize = totals.iter().map(|(_, c)| c).sum();
+        let resolved_count = error_entries
+            .iter()
+            .filter(|e| e.resolved == Some(true))
+            .count();
+        out.push_str(&format!(
+            "\n  Error Recovery:\n    Total errors logged: {}\n    Fix events: {}\n    Resolved: {}\n",
+            grand_total,
+            error_entries.len(),
+            resolved_count
+        ));
+        if let Some((top_cat, top_count)) = totals.first() {
+            out.push_str(&format!(
+                "    Most common error: {} ({})\n",
+                top_cat, top_count
+            ));
+        }
+    }
+
+    // Task outcomes
+    let outcome_content = std::fs::read_to_string(".yoyo/task_outcomes.jsonl").unwrap_or_default();
+    let outcomes = parse_task_outcomes(&outcome_content);
+    if !outcomes.is_empty() {
+        out.push('\n');
+        out.push_str(&format_task_outcome_stats(&outcomes));
+    }
+
+    out
+}
+
+/// A task parsed from SESSION_PLAN.md.
+#[derive(Debug, Clone)]
+pub struct PlanTask {
+    pub number: u32,
+    pub title: String,
+    pub files: Vec<String>,
+    pub description: String,
+}
+
+/// Confidence level for a task.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Confidence {
+    High,
+    Medium,
+    Low,
+}
+
+impl std::fmt::Display for Confidence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Confidence::High => write!(f, "HIGH"),
+            Confidence::Medium => write!(f, "MEDIUM"),
+            Confidence::Low => write!(f, "LOW"),
+        }
+    }
+}
+
+/// Parse tasks from SESSION_PLAN.md content.
+pub fn parse_plan_tasks(content: &str) -> Vec<PlanTask> {
+    let mut tasks = Vec::new();
+    let mut current_number = 0u32;
+    let mut current_title = String::new();
+    let mut current_files: Vec<String> = Vec::new();
+    let mut current_desc = String::new();
+    let mut in_task = false;
+
+    for line in content.lines() {
+        if let Some(rest) = line.strip_prefix("### Task ") {
+            // Save previous task
+            if in_task && current_number > 0 {
+                tasks.push(PlanTask {
+                    number: current_number,
+                    title: current_title.clone(),
+                    files: current_files.clone(),
+                    description: current_desc.trim().to_string(),
+                });
+            }
+            // Parse "### Task N: Title"
+            if let Some((num_str, title)) = rest.split_once(':') {
+                current_number = num_str.trim().parse().unwrap_or(0);
+                current_title = title.trim().to_string();
+            }
+            current_files.clear();
+            current_desc.clear();
+            in_task = true;
+        } else if in_task {
+            if let Some(files_str) = line.strip_prefix("Files:") {
+                current_files = files_str
+                    .split(',')
+                    .map(|f| f.trim().to_string())
+                    .filter(|f| !f.is_empty())
+                    .collect();
+            } else if let Some(desc) = line.strip_prefix("Description:") {
+                current_desc = desc.trim().to_string();
+            } else if !line.starts_with("Issue:") && !line.trim().is_empty() {
+                if !current_desc.is_empty() {
+                    current_desc.push(' ');
+                }
+                current_desc.push_str(line.trim());
+            }
+        }
+    }
+    // Save last task
+    if in_task && current_number > 0 {
+        tasks.push(PlanTask {
+            number: current_number,
+            title: current_title,
+            files: current_files,
+            description: current_desc.trim().to_string(),
+        });
+    }
+    tasks
+}
+
+/// Score a task's confidence based on journal familiarity and connection graph.
+pub fn score_task_confidence(
+    task: &PlanTask,
+    journal_lower: &str,
+    known_files: &[String],
+    graph_concepts: &[String],
+) -> (Confidence, Vec<String>) {
+    let mut score = 0i32;
+    let mut reasons = Vec::new();
+
+    // Check if files are familiar (mentioned in journal or exist in src/)
+    let familiar_files: Vec<_> = task
+        .files
+        .iter()
+        .filter(|f| {
+            known_files
+                .iter()
+                .any(|kf| kf.contains(f.as_str()) || f.contains(kf.as_str()))
+        })
+        .collect();
+    if !task.files.is_empty() && familiar_files.len() == task.files.len() {
+        score += 2;
+        reasons.push("all files familiar".to_string());
+    } else if !familiar_files.is_empty() {
+        score += 1;
+        reasons.push(format!(
+            "{}/{} files familiar",
+            familiar_files.len(),
+            task.files.len()
+        ));
+    } else if !task.files.is_empty() {
+        reasons.push("unfamiliar files".to_string());
+    }
+
+    // Check if task keywords appear in journal (has done similar work before)
+    let title_words: Vec<&str> = task
+        .title
+        .split_whitespace()
+        .filter(|w| w.len() > 3)
+        .collect();
+    let matching_words: Vec<&&str> = title_words
+        .iter()
+        .filter(|w| journal_lower.contains(&w.to_lowercase()))
+        .collect();
+    if matching_words.len() >= 3 {
+        score += 2;
+        reasons.push("strong journal keyword overlap".to_string());
+    } else if !matching_words.is_empty() {
+        score += 1;
+        reasons.push(format!(
+            "some journal keywords ({})",
+            matching_words
+                .iter()
+                .map(|w| w.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    } else {
+        reasons.push("no prior journal mentions".to_string());
+    }
+
+    // Check connection graph for related concepts
+    let desc_lower = task.description.to_lowercase();
+    let related_concepts: Vec<_> = graph_concepts
+        .iter()
+        .filter(|c| {
+            let cl = c.to_lowercase();
+            desc_lower.contains(&cl) || task.title.to_lowercase().contains(&cl)
+        })
+        .collect();
+    if related_concepts.len() >= 2 {
+        score += 2;
+        reasons.push(format!("graph concepts: {}", related_concepts.len()));
+    } else if !related_concepts.is_empty() {
+        score += 1;
+        reasons.push("1 graph concept".to_string());
+    }
+
+    let confidence = if score >= 4 {
+        Confidence::High
+    } else if score >= 2 {
+        Confidence::Medium
+    } else {
+        Confidence::Low
     };
 
-    let context_msg = format!(
-        "A subagent just completed a task. Here is its result:\n\n**Task:** {task}\n\n**Result:**\n{result_text}"
-    );
+    (confidence, reasons)
+}
 
-    Some(context_msg)
+/// Format confidence display for all tasks.
+pub fn format_confidence_display(
+    tasks: &[PlanTask],
+    journal_lower: &str,
+    known_files: &[String],
+    graph_concepts: &[String],
+) -> String {
+    let mut out = String::new();
+    out.push_str("  Task Confidence Scores\n");
+    out.push_str("  ─────────────────────\n");
+
+    if tasks.is_empty() {
+        out.push_str("  No tasks found in SESSION_PLAN.md\n");
+        return out;
+    }
+
+    let mut high_count = 0;
+    let mut low_count = 0;
+
+    for task in tasks {
+        let (confidence, reasons) =
+            score_task_confidence(task, journal_lower, known_files, graph_concepts);
+        let marker = match &confidence {
+            Confidence::High => "●",
+            Confidence::Medium => "◐",
+            Confidence::Low => "○",
+        };
+        match &confidence {
+            Confidence::High => high_count += 1,
+            Confidence::Low => low_count += 1,
+            _ => {}
+        }
+        out.push_str(&format!(
+            "  {} Task {}: {} [{}]\n",
+            marker, task.number, task.title, confidence
+        ));
+        out.push_str(&format!("    Reasons: {}\n", reasons.join("; ")));
+    }
+
+    out.push('\n');
+    if low_count > 0 {
+        out.push_str(&format!(
+            "  Suggestion: {} low-confidence task(s) — consider extra verification or front-load high-confidence work.\n",
+            low_count
+        ));
+    }
+    if high_count == tasks.len() {
+        out.push_str("  All tasks high confidence — execute with conviction.\n");
+    }
+
+    out
+}
+
+/// Handle the /confidence command.
+pub fn handle_confidence(input: &str) {
+    let rest = input.strip_prefix("/confidence").unwrap_or("").trim();
+
+    if rest == "accuracy" {
+        show_confidence_accuracy();
+        return;
+    }
+    if rest == "log" {
+        log_confidence_predictions();
+        return;
+    }
+
+    let plan = std::fs::read_to_string("SESSION_PLAN.md").unwrap_or_default();
+    let tasks = parse_plan_tasks(&plan);
+
+    let journal = std::fs::read_to_string("JOURNAL.md").unwrap_or_default();
+    let journal_lower = journal.to_lowercase();
+
+    // Collect known files from src/
+    let known_files: Vec<String> = std::fs::read_dir("src")
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Collect graph concepts
+    let graph = crate::memory::ConnectionGraph::load();
+    let graph_concepts: Vec<String> = graph
+        .search_concepts("")
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
+
+    let display = format_confidence_display(&tasks, &journal_lower, &known_files, &graph_concepts);
+    println!("{DIM}{display}{RESET}\n");
+}
+
+/// Log current confidence predictions to `.yoyo/confidence_log.jsonl`.
+fn log_confidence_predictions() {
+    let plan = std::fs::read_to_string("SESSION_PLAN.md").unwrap_or_default();
+    let tasks = parse_plan_tasks(&plan);
+    if tasks.is_empty() {
+        println!("{DIM}  No tasks found in SESSION_PLAN.md.{RESET}\n");
+        return;
+    }
+
+    let journal = std::fs::read_to_string("JOURNAL.md").unwrap_or_default();
+    let journal_lower = journal.to_lowercase();
+    let known_files: Vec<String> = std::fs::read_dir("src")
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    let graph = crate::memory::ConnectionGraph::load();
+    let graph_concepts: Vec<String> = graph
+        .search_concepts("")
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
+
+    let day = std::fs::read_to_string("DAY_COUNT")
+        .ok()
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .unwrap_or(0);
+
+    let yoyo_dir = std::path::Path::new(".yoyo");
+    if !yoyo_dir.exists() {
+        let _ = std::fs::create_dir_all(yoyo_dir);
+    }
+
+    use std::io::Write;
+    let mut count = 0;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(".yoyo/confidence_log.jsonl")
+    {
+        for task in &tasks {
+            let (conf, _) =
+                score_task_confidence(task, &journal_lower, &known_files, &graph_concepts);
+            let line = format!(
+                "{{\"day\":{},\"task\":{},\"title\":\"{}\",\"confidence\":\"{}\"}}",
+                day,
+                task.number,
+                task.title.replace('"', "'"),
+                conf
+            );
+            let _ = writeln!(f, "{}", line);
+            count += 1;
+        }
+    }
+    println!(
+        "{GREEN}  ✓ Logged {count} confidence predictions to .yoyo/confidence_log.jsonl{RESET}\n"
+    );
+}
+
+/// A confidence prediction record.
+#[derive(Debug)]
+pub struct ConfidencePrediction {
+    #[allow(dead_code)] // Populated for future per-day analysis
+    pub day: u32,
+    pub task: u32,
+    #[allow(dead_code)] // Populated for test access and future display
+    pub title: String,
+    pub confidence: String,
+}
+
+/// Parse confidence log entries.
+pub fn parse_confidence_log(content: &str) -> Vec<ConfidencePrediction> {
+    let mut entries = Vec::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let (Some(day), Some(task), Some(title), Some(conf)) = (
+            extract_conf_number(line, "day"),
+            extract_conf_number(line, "task"),
+            extract_conf_string(line, "title"),
+            extract_conf_string(line, "confidence"),
+        ) {
+            entries.push(ConfidencePrediction {
+                day,
+                task,
+                title,
+                confidence: conf,
+            });
+        }
+    }
+    entries
+}
+
+fn extract_conf_string(json: &str, key: &str) -> Option<String> {
+    let pattern = format!("\"{}\":\"", key);
+    let start = json.find(&pattern)? + pattern.len();
+    let rest = &json[start..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
+}
+
+fn extract_conf_number(json: &str, key: &str) -> Option<u32> {
+    let pattern = format!("\"{}\":", key);
+    let start = json.find(&pattern)? + pattern.len();
+    let rest = &json[start..];
+    let end = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
+    rest[..end].parse().ok()
+}
+
+/// Show confidence calibration: how accurate were predictions?
+fn show_confidence_accuracy() {
+    let content = std::fs::read_to_string(".yoyo/confidence_log.jsonl").unwrap_or_default();
+    let predictions = parse_confidence_log(&content);
+    if predictions.is_empty() {
+        println!(
+            "{DIM}  No confidence predictions logged yet.\n  Use /confidence log to record predictions.{RESET}\n"
+        );
+        return;
+    }
+
+    // Try to correlate with journal outcomes (look for "VERIFIED" or "REVERTED" per task)
+    let journal = std::fs::read_to_string("JOURNAL.md").unwrap_or_default();
+    let journal_lower = journal.to_lowercase();
+
+    let mut high_total = 0u32;
+    let mut high_success = 0u32;
+    let mut med_total = 0u32;
+    let mut med_success = 0u32;
+    let mut low_total = 0u32;
+    let mut low_success = 0u32;
+
+    for pred in &predictions {
+        // Heuristic: check if journal mentions this task as verified or reverted
+        let task_marker = format!("task {}", pred.task);
+        let verified = journal_lower.contains(&format!("{}: verified", task_marker))
+            || journal_lower.contains(&format!("task {}: verified ok", pred.task))
+            || journal_lower.contains("zero revert");
+
+        match pred.confidence.to_uppercase().as_str() {
+            "HIGH" => {
+                high_total += 1;
+                if verified {
+                    high_success += 1;
+                }
+            }
+            "MEDIUM" => {
+                med_total += 1;
+                if verified {
+                    med_success += 1;
+                }
+            }
+            "LOW" => {
+                low_total += 1;
+                if verified {
+                    low_success += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let total = predictions.len();
+    println!("  Confidence Calibration ({total} predictions):\n");
+    if high_total > 0 {
+        let pct = (high_success as f64 / high_total as f64) * 100.0;
+        println!(
+            "    HIGH:   {}/{} ({:.0}%) verified",
+            high_success, high_total, pct
+        );
+    }
+    if med_total > 0 {
+        let pct = (med_success as f64 / med_total as f64) * 100.0;
+        println!(
+            "    MEDIUM: {}/{} ({:.0}%) verified",
+            med_success, med_total, pct
+        );
+    }
+    if low_total > 0 {
+        let pct = (low_success as f64 / low_total as f64) * 100.0;
+        println!(
+            "    LOW:    {}/{} ({:.0}%) verified",
+            low_success, low_total, pct
+        );
+    }
+    if high_total == 0 && med_total == 0 && low_total == 0 {
+        println!("    No predictions to calibrate.");
+    }
+    println!();
+}
+
+/// Handle the /stats command.
+pub fn handle_stats() {
+    let journal = std::fs::read_to_string("JOURNAL.md").unwrap_or_default();
+    let journal_stats = parse_journal_stats(&journal);
+    let error_content = std::fs::read_to_string(".yoyo/error_log.jsonl").unwrap_or_default();
+    let display = format_stats_display(&journal_stats, &error_content);
+    println!("{DIM}{display}{RESET}\n");
+}
+
+// ── /timing ─────────────────────────────────────────────────────────────
+
+pub struct SessionTiming {
+    #[allow(dead_code)]
+    pub day: u32,
+    pub session_time: String,
+    pub duration_secs: u64,
+    pub tasks_completed: u32,
+    pub tasks_reverted: u32,
+}
+
+pub fn parse_session_timings(content: &str) -> Vec<SessionTiming> {
+    let mut entries = Vec::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        // Parse JSON manually: {"day":N,"session_time":"HH:MM","duration_secs":N,"tasks_completed":N,"tasks_reverted":N}
+        let day = extract_timing_u32(line, "day").unwrap_or(0);
+        let session_time = extract_timing_string(line, "session_time").unwrap_or_default();
+        let duration_secs = extract_timing_u64(line, "duration_secs").unwrap_or(0);
+        let tasks_completed = extract_timing_u32(line, "tasks_completed").unwrap_or(0);
+        let tasks_reverted = extract_timing_u32(line, "tasks_reverted").unwrap_or(0);
+
+        if duration_secs > 0 || !session_time.is_empty() {
+            entries.push(SessionTiming {
+                day,
+                session_time,
+                duration_secs,
+                tasks_completed,
+                tasks_reverted,
+            });
+        }
+    }
+    entries
+}
+
+fn extract_timing_u32(json: &str, key: &str) -> Option<u32> {
+    let pattern = format!("\"{}\":", key);
+    let idx = json.find(&pattern)? + pattern.len();
+    let rest = &json[idx..];
+    let end = rest.find([',', '}'])?;
+    rest[..end].trim().parse().ok()
+}
+
+fn extract_timing_u64(json: &str, key: &str) -> Option<u64> {
+    let pattern = format!("\"{}\":", key);
+    let idx = json.find(&pattern)? + pattern.len();
+    let rest = &json[idx..];
+    let end = rest.find([',', '}'])?;
+    rest[..end].trim().parse().ok()
+}
+
+fn extract_timing_string(json: &str, key: &str) -> Option<String> {
+    let pattern = format!("\"{}\":\"", key);
+    let idx = json.find(&pattern)? + pattern.len();
+    let rest = &json[idx..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
+}
+
+pub fn format_timing_display(entries: &[SessionTiming]) -> String {
+    let mut out = String::new();
+    if entries.is_empty() {
+        out.push_str("  No session timing data recorded yet.\n");
+        out.push_str("  (Timing is logged by evolve-ide.sh finish)\n");
+        return out;
+    }
+
+    out.push_str("  Session Timing History:\n\n");
+    out.push_str("  Day  | Time  | Duration | Tasks | Reverts\n");
+    out.push_str("  ─────┼───────┼──────────┼───────┼────────\n");
+
+    for entry in entries {
+        let mins = entry.duration_secs / 60;
+        let secs = entry.duration_secs % 60;
+        out.push_str(&format!(
+            "  {:>4} | {:>5} | {:>4}m{:02}s | {:>5} | {:>5}\n",
+            entry.day, entry.session_time, mins, secs, entry.tasks_completed, entry.tasks_reverted,
+        ));
+    }
+
+    // Summary
+    let total_secs: u64 = entries.iter().map(|e| e.duration_secs).sum();
+    let total_tasks: u32 = entries.iter().map(|e| e.tasks_completed).sum();
+    let total_reverts: u32 = entries.iter().map(|e| e.tasks_reverted).sum();
+    let avg_secs = if entries.is_empty() {
+        0
+    } else {
+        total_secs / entries.len() as u64
+    };
+
+    out.push_str(&format!("\n  {} sessions total\n", entries.len()));
+    out.push_str(&format!(
+        "  Average duration: {}m{:02}s\n",
+        avg_secs / 60,
+        avg_secs % 60
+    ));
+    out.push_str(&format!(
+        "  Total tasks: {} completed, {} reverted\n",
+        total_tasks, total_reverts
+    ));
+
+    out
+}
+
+pub fn handle_timing() {
+    let content = std::fs::read_to_string(".yoyo/session_timing.jsonl").unwrap_or_default();
+    let entries = parse_session_timings(&content);
+    let display = format_timing_display(&entries);
+    println!("{DIM}{display}{RESET}\n");
+}
+
+// ── Task outcome tracking ───────────────────────────────────────────────
+
+pub struct TaskOutcome {
+    pub day: u32,
+    #[allow(dead_code)]
+    pub task_num: u32,
+    #[allow(dead_code)]
+    pub title: String,
+    pub outcome: String, // "verified" or "reverted"
+}
+
+pub fn parse_task_outcomes(content: &str) -> Vec<TaskOutcome> {
+    let mut entries = Vec::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let day = extract_timing_u32(line, "day").unwrap_or(0);
+        let task_num = extract_timing_u32(line, "task_num").unwrap_or(0);
+        let title = extract_timing_string(line, "title").unwrap_or_default();
+        let outcome = extract_timing_string(line, "outcome").unwrap_or_default();
+
+        if !outcome.is_empty() {
+            entries.push(TaskOutcome {
+                day,
+                task_num,
+                title,
+                outcome,
+            });
+        }
+    }
+    entries
+}
+
+pub fn format_task_outcome_stats(outcomes: &[TaskOutcome]) -> String {
+    let mut out = String::new();
+    if outcomes.is_empty() {
+        out.push_str("  No task outcome data recorded.\n");
+        return out;
+    }
+
+    let verified = outcomes.iter().filter(|o| o.outcome == "verified").count();
+    let reverted = outcomes.iter().filter(|o| o.outcome == "reverted").count();
+    let total = outcomes.len();
+    let success_rate = if total > 0 {
+        (verified as f64 / total as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    out.push_str("  Task Outcomes:\n");
+    out.push_str(&format!(
+        "    Total: {} | Verified: {} | Reverted: {} | Success: {:.0}%\n",
+        total, verified, reverted, success_rate
+    ));
+
+    // Per-day breakdown
+    let mut days: std::collections::BTreeMap<u32, (u32, u32)> = std::collections::BTreeMap::new();
+    for o in outcomes {
+        let entry = days.entry(o.day).or_insert((0, 0));
+        if o.outcome == "verified" {
+            entry.0 += 1;
+        } else {
+            entry.1 += 1;
+        }
+    }
+
+    if days.len() > 1 {
+        out.push_str("\n    Per day:\n");
+        for (day, (v, r)) in &days {
+            out.push_str(&format!(
+                "      Day {}: {} verified, {} reverted\n",
+                day, v, r
+            ));
+        }
+    }
+
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::cli::AUTO_SAVE_SESSION_PATH;
+    use std::sync::{Mutex, OnceLock};
+
+    static CWD_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn lock_cwd() -> std::sync::MutexGuard<'static, ()> {
+        CWD_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
 
     #[test]
     fn test_auto_save_session_path_constant() {
@@ -395,6 +1517,8 @@ mod tests {
     fn test_auto_save_creates_directory_and_file() {
         use yoagent::agent::Agent;
         use yoagent::provider::AnthropicProvider;
+
+        let _cwd_guard = lock_cwd();
 
         // Use a temp directory to avoid polluting the project
         let tmp_dir = std::env::temp_dir().join("yoyo_test_autosave");
@@ -425,6 +1549,8 @@ mod tests {
     #[test]
     fn test_continue_session_path_prefers_auto_save() {
         // Create a temp directory with .yoyo/last-session.json
+        let _cwd_guard = lock_cwd();
+
         let tmp_dir = std::env::temp_dir().join("yoyo_test_continue_path");
         let _ = std::fs::remove_dir_all(&tmp_dir);
         std::fs::create_dir_all(tmp_dir.join(".yoyo")).unwrap();
@@ -446,6 +1572,8 @@ mod tests {
     #[test]
     fn test_continue_session_path_falls_back_to_default() {
         // Create a temp directory WITHOUT .yoyo/last-session.json
+        let _cwd_guard = lock_cwd();
+
         let tmp_dir = std::env::temp_dir().join("yoyo_test_continue_fallback");
         let _ = std::fs::remove_dir_all(&tmp_dir);
         std::fs::create_dir_all(&tmp_dir).unwrap();
@@ -461,5 +1589,335 @@ mod tests {
 
         std::env::set_current_dir(&original_dir).unwrap();
         let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_parse_journal_stats_counts_sessions() {
+        let journal = "# Journal\n\n## Day 19 — 07:21 — title\nSome text\n\n## Day 19 — 07:00 — title2\nMore text\n\n## Day 18 — 23:36 — title3\nText\n";
+        let stats = parse_journal_stats(journal);
+        assert_eq!(stats.total_sessions, 3);
+        assert_eq!(stats.sessions_by_day.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_journal_stats_finds_test_count() {
+        let journal = "## Day 19 — 07:21 — title\n716 unit tests + 67 integration tests.\n";
+        let stats = parse_journal_stats(journal);
+        assert_eq!(stats.total_tests_mentioned, 716);
+    }
+
+    #[test]
+    fn test_parse_journal_stats_empty() {
+        let stats = parse_journal_stats("");
+        assert_eq!(stats.total_sessions, 0);
+        assert!(stats.sessions_by_day.is_empty());
+    }
+
+    #[test]
+    fn test_format_stats_display_basic() {
+        let stats = JournalStats {
+            total_sessions: 5,
+            sessions_by_day: vec![(18, 2), (19, 3)],
+            total_tests_mentioned: 700,
+            test_counts_by_session: vec![(18, 600), (18, 650), (19, 680), (19, 700)],
+            revert_sessions: 1,
+            task_sessions: 4,
+        };
+        let display = format_stats_display(&stats, "");
+        assert!(display.contains("Total sessions: 5"));
+        assert!(display.contains("Days active: 2"));
+        assert!(display.contains("Avg sessions/day: 2.5"));
+        assert!(display.contains("Most productive: Day 19 (3 sessions)"));
+        assert!(display.contains("Peak test count: 700"));
+        assert!(display.contains("Convergence:"));
+        assert!(display.contains("Revert rate:"));
+        assert!(display.contains("Test growth:"));
+    }
+
+    #[test]
+    fn test_format_stats_display_with_errors() {
+        let stats = JournalStats {
+            total_sessions: 1,
+            sessions_by_day: vec![(19, 1)],
+            total_tests_mentioned: 0,
+            test_counts_by_session: Vec::new(),
+            revert_sessions: 0,
+            task_sessions: 0,
+        };
+        let error_content = r#"{"ts":"2026-03-19T06:30:00Z","day":19,"categories":{"missing_import":3},"source":"fix","resolved":"true"}"#;
+        let display = format_stats_display(&stats, error_content);
+        assert!(display.contains("Error Recovery"));
+        assert!(display.contains("Total errors logged: 3"));
+        assert!(display.contains("Resolved: 1"));
+    }
+
+    #[test]
+    fn test_compute_trend_improving() {
+        let values = vec![100.0, 200.0, 300.0, 400.0];
+        let (slope, label) = compute_trend(&values);
+        assert!(slope > 0.0);
+        assert_eq!(label, "improving");
+    }
+
+    #[test]
+    fn test_compute_trend_declining() {
+        let values = vec![400.0, 300.0, 200.0, 100.0];
+        let (slope, label) = compute_trend(&values);
+        assert!(slope < 0.0);
+        assert_eq!(label, "declining");
+    }
+
+    #[test]
+    fn test_compute_trend_stable() {
+        let values = vec![100.0, 100.0, 100.0, 100.0];
+        let (slope, label) = compute_trend(&values);
+        assert!(slope.abs() < 0.01);
+        assert_eq!(label, "stable");
+    }
+
+    #[test]
+    fn test_compute_trend_insufficient_data() {
+        let values = vec![100.0];
+        let (_, label) = compute_trend(&values);
+        assert_eq!(label, "insufficient data");
+    }
+
+    #[test]
+    fn test_parse_journal_stats_tracks_reverts() {
+        let journal = "## Day 10 — 06:00 — session one\nFive tasks, zero reverts.\n\n## Day 10 — 12:00 — session two\nTask 1 was reverted due to build failure.\n";
+        let stats = parse_journal_stats(journal);
+        assert_eq!(stats.total_sessions, 2);
+        assert_eq!(stats.revert_sessions, 1); // only second mentions "revert"
+    }
+
+    #[test]
+    fn test_parse_journal_stats_tracks_test_counts() {
+        let journal = "## Day 18 — 12:00 — session\n694 unit tests, 67 integration tests.\n\n## Day 19 — 08:00 — session\n739 unit tests + 67 integration tests.\n";
+        let stats = parse_journal_stats(journal);
+        assert_eq!(stats.test_counts_by_session.len(), 2);
+        assert_eq!(stats.test_counts_by_session[0], (18, 694));
+        assert_eq!(stats.test_counts_by_session[1], (19, 739));
+        assert_eq!(stats.total_tests_mentioned, 739);
+    }
+
+    #[test]
+    fn test_convergence_verdict_converging() {
+        let stats = JournalStats {
+            total_sessions: 10,
+            sessions_by_day: vec![(15, 2), (16, 3), (17, 2), (18, 3)],
+            total_tests_mentioned: 739,
+            test_counts_by_session: vec![(15, 500), (16, 550), (17, 600), (18, 700)],
+            revert_sessions: 1,
+            task_sessions: 8,
+        };
+        let display = format_stats_display(&stats, "");
+        assert!(display.contains("converging"));
+    }
+
+    #[test]
+    fn test_parse_plan_tasks_basic() {
+        let plan = "## Session Plan\n\n### Task 1: Fix the widget\nFiles: src/main.rs, src/format.rs\nDescription: Make the widget work properly.\nIssue: none\n\n### Task 2: Add tests\nFiles: src/commands.rs\nDescription: Write unit tests for commands.\nIssue: #42\n";
+        let tasks = parse_plan_tasks(plan);
+        assert_eq!(tasks.len(), 2);
+        assert_eq!(tasks[0].number, 1);
+        assert_eq!(tasks[0].title, "Fix the widget");
+        assert_eq!(tasks[0].files, vec!["src/main.rs", "src/format.rs"]);
+        assert!(tasks[0].description.contains("widget work properly"));
+        assert_eq!(tasks[1].number, 2);
+        assert_eq!(tasks[1].title, "Add tests");
+    }
+
+    #[test]
+    fn test_parse_plan_tasks_empty() {
+        let tasks = parse_plan_tasks("nothing here");
+        assert!(tasks.is_empty());
+    }
+
+    #[test]
+    fn test_score_task_high_confidence() {
+        let task = PlanTask {
+            number: 1,
+            title: "Fix error handling in format module".to_string(),
+            files: vec!["src/format.rs".to_string()],
+            description: "Update error classification logic".to_string(),
+        };
+        let journal =
+            "day 15: worked on error handling in the format module. fixed classification bugs.";
+        let known_files = vec!["format.rs".to_string()];
+        let concepts = vec!["error".to_string(), "classification".to_string()];
+        let (conf, _reasons) = score_task_confidence(&task, journal, &known_files, &concepts);
+        assert_eq!(conf, Confidence::High);
+    }
+
+    #[test]
+    fn test_score_task_low_confidence() {
+        let task = PlanTask {
+            number: 1,
+            title: "Implement WASM compilation target".to_string(),
+            files: vec!["src/wasm.rs".to_string()],
+            description: "Add WebAssembly support for browser execution".to_string(),
+        };
+        let journal = "day 15: worked on stats and journal parsing.";
+        let known_files = vec!["main.rs".to_string()];
+        let concepts: Vec<String> = vec![];
+        let (conf, _reasons) = score_task_confidence(&task, journal, &known_files, &concepts);
+        assert_eq!(conf, Confidence::Low);
+    }
+
+    #[test]
+    fn test_format_confidence_display_empty() {
+        let display = format_confidence_display(&[], "", &[], &[]);
+        assert!(display.contains("No tasks found"));
+    }
+
+    #[test]
+    fn test_format_confidence_display_shows_markers() {
+        let tasks = vec![PlanTask {
+            number: 1,
+            title: "Test task".to_string(),
+            files: vec!["src/main.rs".to_string()],
+            description: "A test task".to_string(),
+        }];
+        let display = format_confidence_display(&tasks, "", &[], &[]);
+        assert!(display.contains("Task 1:"));
+        assert!(display.contains("Reasons:"));
+    }
+
+    #[test]
+    fn test_confidence_display_enum() {
+        assert_eq!(format!("{}", Confidence::High), "HIGH");
+        assert_eq!(format!("{}", Confidence::Medium), "MEDIUM");
+        assert_eq!(format!("{}", Confidence::Low), "LOW");
+    }
+
+    #[test]
+    fn test_parse_confidence_log_basic() {
+        let content = r#"{"day":19,"task":1,"title":"Extract commands_memory.rs","confidence":"HIGH"}
+{"day":19,"task":2,"title":"Symbol coupling","confidence":"MEDIUM"}"#;
+        let entries = parse_confidence_log(content);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].day, 19);
+        assert_eq!(entries[0].task, 1);
+        assert_eq!(entries[0].confidence, "HIGH");
+        assert_eq!(entries[1].confidence, "MEDIUM");
+    }
+
+    #[test]
+    fn test_parse_confidence_log_empty() {
+        assert!(parse_confidence_log("").is_empty());
+        assert!(parse_confidence_log("\n\n").is_empty());
+    }
+
+    #[test]
+    fn test_parse_confidence_log_malformed_skipped() {
+        let content = "not json\n{\"day\":19,\"task\":1,\"title\":\"t\",\"confidence\":\"LOW\"}\n";
+        let entries = parse_confidence_log(content);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].confidence, "LOW");
+    }
+
+    // ── /timing tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_session_timings_basic() {
+        let content = r#"{"day":19,"session_time":"10:22","duration_secs":1200,"tasks_completed":5,"tasks_reverted":0}
+{"day":19,"session_time":"16:45","duration_secs":900,"tasks_completed":3,"tasks_reverted":1}"#;
+        let entries = parse_session_timings(content);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].duration_secs, 1200);
+        assert_eq!(entries[0].tasks_completed, 5);
+        assert_eq!(entries[1].tasks_reverted, 1);
+    }
+
+    #[test]
+    fn test_parse_session_timings_empty() {
+        assert!(parse_session_timings("").is_empty());
+        assert!(parse_session_timings("\n\n").is_empty());
+    }
+
+    #[test]
+    fn test_format_timing_display_empty() {
+        let display = format_timing_display(&[]);
+        assert!(display.contains("No session timing"));
+    }
+
+    #[test]
+    fn test_format_timing_display_with_data() {
+        let entries = vec![
+            SessionTiming {
+                day: 19,
+                session_time: "10:22".to_string(),
+                duration_secs: 1200,
+                tasks_completed: 5,
+                tasks_reverted: 0,
+            },
+            SessionTiming {
+                day: 19,
+                session_time: "16:45".to_string(),
+                duration_secs: 600,
+                tasks_completed: 3,
+                tasks_reverted: 1,
+            },
+        ];
+        let display = format_timing_display(&entries);
+        assert!(display.contains("20m00s"));
+        assert!(display.contains("10m00s"));
+        assert!(display.contains("2 sessions"));
+        assert!(display.contains("Average duration: 15m00s"));
+        assert!(display.contains("8 completed, 1 reverted"));
+    }
+
+    // ── Task outcome tests ─────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_task_outcomes_basic() {
+        let content = r#"{"day":19,"task_num":1,"title":"Extract module","outcome":"verified"}
+{"day":19,"task_num":2,"title":"Add command","outcome":"reverted"}"#;
+        let outcomes = parse_task_outcomes(content);
+        assert_eq!(outcomes.len(), 2);
+        assert_eq!(outcomes[0].outcome, "verified");
+        assert_eq!(outcomes[0].task_num, 1);
+        assert_eq!(outcomes[1].outcome, "reverted");
+    }
+
+    #[test]
+    fn test_parse_task_outcomes_empty() {
+        assert!(parse_task_outcomes("").is_empty());
+        assert!(parse_task_outcomes("\n\n").is_empty());
+    }
+
+    #[test]
+    fn test_format_task_outcome_stats() {
+        let outcomes = vec![
+            TaskOutcome {
+                day: 19,
+                task_num: 1,
+                title: "t1".to_string(),
+                outcome: "verified".to_string(),
+            },
+            TaskOutcome {
+                day: 19,
+                task_num: 2,
+                title: "t2".to_string(),
+                outcome: "verified".to_string(),
+            },
+            TaskOutcome {
+                day: 19,
+                task_num: 3,
+                title: "t3".to_string(),
+                outcome: "reverted".to_string(),
+            },
+        ];
+        let display = format_task_outcome_stats(&outcomes);
+        assert!(display.contains("Total: 3"));
+        assert!(display.contains("Verified: 2"));
+        assert!(display.contains("Reverted: 1"));
+        assert!(display.contains("67%"));
+    }
+
+    #[test]
+    fn test_format_task_outcome_stats_empty() {
+        let display = format_task_outcome_stats(&[]);
+        assert!(display.contains("No task outcome data"));
     }
 }

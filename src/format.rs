@@ -368,6 +368,22 @@ fn comment_prefix(lang: &str) -> &'static str {
 /// comments (dim), and numbers (yellow).
 /// JSON keys are highlighted in cyan, YAML keys in bold yellow.
 /// Falls back to DIM when language is unrecognized.
+/// Highlight a diff line: + lines green, - lines red, @@ lines cyan.
+pub fn highlight_diff_line(line: &str) -> String {
+    let trimmed = line.trim_start();
+    if trimmed.starts_with('+') && !trimmed.starts_with("+++") {
+        format!("{GREEN}{line}{RESET}")
+    } else if trimmed.starts_with('-') && !trimmed.starts_with("---") {
+        format!("{RED}{line}{RESET}")
+    } else if trimmed.starts_with("@@") {
+        format!("{CYAN}{line}{RESET}")
+    } else if trimmed.starts_with("---") || trimmed.starts_with("+++") {
+        format!("{BOLD}{line}{RESET}")
+    } else {
+        format!("{DIM}{line}{RESET}")
+    }
+}
+
 pub fn highlight_code_line(lang: &str, line: &str) -> String {
     let norm = match normalize_lang(lang) {
         Some(n) => n,
@@ -1174,7 +1190,7 @@ impl MarkdownRenderer {
                 // Closing fence
                 self.in_code_block = false;
                 self.code_lang = None;
-                return format!("{DIM}{line}{RESET}");
+                return format!("{DIM}  └─{RESET}");
             } else {
                 // Opening fence — capture language if present
                 self.in_code_block = true;
@@ -1184,22 +1200,73 @@ impl MarkdownRenderer {
                 } else {
                     Some(lang.to_string())
                 };
-                return format!("{DIM}{line}{RESET}");
+                let lang_label = if lang.is_empty() {
+                    String::new()
+                } else {
+                    format!(" {CYAN}{lang}{RESET}")
+                };
+                return format!("{DIM}  ┌─{lang_label}{RESET}");
             }
         }
 
         if self.in_code_block {
-            // Code block content: syntax highlight if language is known, else dim
-            return if let Some(ref lang) = self.code_lang {
-                highlight_code_line(lang, line)
+            // Code block content with left border
+            let is_diff = self.code_lang.as_deref() == Some("diff");
+            let content = if is_diff || trimmed.is_empty() {
+                // Diff mode or empty line — handle +/- highlighting
+                highlight_diff_line(line)
+            } else if let Some(ref lang) = self.code_lang {
+                // Check for inline diff markers even in non-diff code blocks
+                if trimmed.starts_with('+') && !trimmed.starts_with("++") {
+                    format!("{GREEN}{line}{RESET}")
+                } else if trimmed.starts_with('-') && !trimmed.starts_with("--") {
+                    format!("{RED}{line}{RESET}")
+                } else {
+                    highlight_code_line(lang, line)
+                }
             } else {
                 format!("{DIM}{line}{RESET}")
             };
+            return format!("{DIM}  │{RESET} {content}");
         }
 
         // Header: # at line start → BOLD+CYAN
         if trimmed.starts_with('#') {
             return format!("{BOLD}{CYAN}{line}{RESET}");
+        }
+
+        // Horizontal rule: --- or *** or ___
+        if trimmed.len() >= 3
+            && (trimmed.chars().all(|c| c == '-' || c == ' ')
+                || trimmed.chars().all(|c| c == '*' || c == ' ')
+                || trimmed.chars().all(|c| c == '_' || c == ' '))
+            && trimmed.chars().filter(|c| !c.is_whitespace()).count() >= 3
+        {
+            return format!("{DIM}  ────────────────────────────────{RESET}");
+        }
+
+        // Blockquote: > at line start
+        if let Some(quote_content) = trimmed.strip_prefix('>') {
+            let inner = quote_content.trim_start();
+            return format!("{DIM}  │ {inner}{RESET}");
+        }
+
+        // Bullet lists: -, *, or numbered (1.)
+        if (trimmed.starts_with("- ") || trimmed.starts_with("* ")) && trimmed.len() > 2 {
+            let rest = &trimmed[2..];
+            let formatted_rest = self.render_inline(rest);
+            let indent = &line[..line.len() - trimmed.len()]; // preserve leading whitespace
+            return format!("{indent}  • {formatted_rest}");
+        }
+        // Numbered lists: "1. ", "2. ", etc.
+        if let Some(dot_pos) = trimmed.find(". ") {
+            if dot_pos <= 3 && trimmed[..dot_pos].chars().all(|c| c.is_ascii_digit()) {
+                let num = &trimmed[..dot_pos];
+                let rest = &trimmed[dot_pos + 2..];
+                let formatted_rest = self.render_inline(rest);
+                let indent = &line[..line.len() - trimmed.len()];
+                return format!("{indent}  {DIM}{num}.{RESET} {formatted_rest}");
+            }
         }
 
         // Apply inline formatting for normal text
@@ -1986,12 +2053,17 @@ mod tests {
         let out = r.render_delta(input);
         let flushed = r.flush();
         let full = format!("{out}{flushed}");
-        // Language should be captured and fence dimmed
-        assert!(full.contains(&format!("{DIM}```rust{RESET}")));
+        // Opening fence shows ┌─ with language label
+        assert!(full.contains("┌─"), "should have opening border");
+        assert!(full.contains(&format!("{CYAN}rust{RESET}")));
+        // Code lines have │ left border
+        assert!(full.contains("│"), "should have left border");
         // "let" should be keyword-highlighted, not just DIM
         assert!(full.contains(&format!("{BOLD_CYAN}let{RESET}")));
         // Number should be yellow
         assert!(full.contains(&format!("{YELLOW}1{RESET}")));
+        // Closing fence shows └─
+        assert!(full.contains("└─"), "should have closing border");
     }
 
     #[test]
@@ -2019,6 +2091,61 @@ mod tests {
     }
 
     #[test]
+    fn test_md_bullet_list() {
+        let out = render_full("- first item\n- second item\n");
+        assert!(out.contains("•"), "bullet list should use • marker");
+        assert!(out.contains("first item"));
+        assert!(out.contains("second item"));
+    }
+
+    #[test]
+    fn test_md_numbered_list() {
+        let out = render_full("1. step one\n2. step two\n");
+        assert!(out.contains("1."));
+        assert!(out.contains("step one"));
+        assert!(out.contains("step two"));
+    }
+
+    #[test]
+    fn test_md_blockquote() {
+        let out = render_full("> some quoted text\n");
+        assert!(out.contains("│"), "blockquote should have │ border");
+        assert!(out.contains("some quoted text"));
+    }
+
+    #[test]
+    fn test_md_horizontal_rule() {
+        let out = render_full("---\n");
+        assert!(out.contains("──"), "horizontal rule should render as line");
+    }
+
+    #[test]
+    fn test_md_diff_code_block() {
+        let input = "```diff\n+added line\n-removed line\n normal line\n```\n";
+        let out = render_full(input);
+        assert!(out.contains(&format!("{GREEN}+added line{RESET}")));
+        assert!(out.contains(&format!("{RED}-removed line{RESET}")));
+    }
+
+    #[test]
+    fn test_highlight_diff_line_added() {
+        let out = highlight_diff_line("+new code");
+        assert!(out.contains(&format!("{GREEN}+new code{RESET}")));
+    }
+
+    #[test]
+    fn test_highlight_diff_line_removed() {
+        let out = highlight_diff_line("-old code");
+        assert!(out.contains(&format!("{RED}-old code{RESET}")));
+    }
+
+    #[test]
+    fn test_highlight_diff_line_hunk_header() {
+        let out = highlight_diff_line("@@ -1,3 +1,4 @@");
+        assert!(out.contains(&format!("{CYAN}@@ -1,3 +1,4 @@{RESET}")));
+    }
+
+    #[test]
     fn test_md_partial_delta_fence() {
         // Fence marker split across multiple deltas
         let mut r = MarkdownRenderer::new();
@@ -2026,16 +2153,23 @@ mod tests {
         // Nothing emitted yet — still buffered (no newline)
         assert_eq!(out1, "");
         let out2 = r.render_delta("`\n");
-        // Now the fence line is complete
-        assert!(out2.contains(&format!("{DIM}```{RESET}")));
+        // Now the fence line is complete — shows ┌─ border
+        assert!(out2.contains("┌─"));
         let out3 = r.render_delta("code here\n");
-        assert!(out3.contains(&format!("{DIM}code here{RESET}")));
+        // Code lines show with │ border
+        assert!(out3.contains("code here"));
+        assert!(out3.contains("│"));
         let out4 = r.render_delta("```\n");
-        assert!(out4.contains(&format!("{DIM}```{RESET}")));
+        // Closing fence shows └─
+        assert!(out4.contains("└─"));
         // After closing, normal text again
         let out5 = r.render_delta("normal\n");
         assert!(out5.contains("normal"));
-        assert!(!out5.contains(&format!("{DIM}")));
+        // When colors are enabled, DIM should not leak into normal text
+        let dim_str = format!("{DIM}");
+        if !dim_str.is_empty() {
+            assert!(!out5.contains(&dim_str));
+        }
     }
 
     #[test]
@@ -2164,18 +2298,19 @@ mod tests {
     #[test]
     fn test_md_streaming_code_fence_detected_at_line_start() {
         let mut r = MarkdownRenderer::new();
-        // Send a code fence at line start
+        // Send a code fence at line start — shows ┌─ border
         let out1 = r.render_delta("```\n");
-        assert!(out1.contains(&format!("{DIM}```{RESET}")));
+        assert!(out1.contains("┌─"), "opening fence should show ┌─");
         assert!(r.in_code_block);
 
-        // Content inside code block
+        // Content inside code block — has │ left border
         let out2 = r.render_delta("some code\n");
-        assert!(out2.contains(&format!("{DIM}some code{RESET}")));
+        assert!(out2.contains("some code"));
+        assert!(out2.contains("│"), "code content should have │ border");
 
-        // Closing fence
+        // Closing fence — shows └─
         let out3 = r.render_delta("```\n");
-        assert!(out3.contains(&format!("{DIM}```{RESET}")));
+        assert!(out3.contains("└─"), "closing fence should show └─");
         assert!(!r.in_code_block);
     }
 
@@ -2419,12 +2554,16 @@ mod tests {
     fn test_highlight_no_false_keyword_in_identifier() {
         // "letter" contains "let" but should NOT be highlighted
         let out = highlight_code_line("rust", "let letter = 1;");
-        assert!(out.contains(&format!("{BOLD_CYAN}let{RESET}")));
-        // "letter" should appear plain
+        // "letter" should appear in output
         assert!(out.contains("letter"));
-        // Make sure "letter" isn't colored as keyword
-        let letter_highlighted = format!("{BOLD_CYAN}letter{RESET}");
-        assert!(!out.contains(&letter_highlighted));
+        // When colors are enabled, "let" should be keyword-highlighted
+        // but "letter" should NOT be
+        let bold_cyan_str = format!("{BOLD_CYAN}");
+        if !bold_cyan_str.is_empty() {
+            assert!(out.contains(&format!("{BOLD_CYAN}let{RESET}")));
+            let letter_highlighted = format!("{BOLD_CYAN}letter{RESET}");
+            assert!(!out.contains(&letter_highlighted));
+        }
     }
 
     #[test]

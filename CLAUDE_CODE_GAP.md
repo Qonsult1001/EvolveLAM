@@ -1,6 +1,6 @@
 # Gap Analysis: yoyo vs Claude Code
 
-Last updated: Day 17 (2026-03-17)
+Last updated: Day 21 (2026-03-21)
 
 This document tracks the feature gap between yoyo and Claude Code, used to inform development priorities when there are no community issues to address.
 
@@ -20,9 +20,9 @@ This document tracks the feature gap between yoyo and Claude Code, used to infor
 | Multi-turn conversation | ✅ | ✅ | Both maintain conversation history |
 | Thinking/reasoning display | ✅ | ✅ | yoyo shows thinking dimmed |
 | Error recovery / auto-retry | ✅ | ✅ | yoagent retries 3x with exponential backoff by default |
-| Subagent / task spawning | 🟡 | ✅ | Basic `/spawn` runs tasks in separate context; Claude Code has richer orchestration |
+| Subagent / task spawning | ✅ | ✅ | `/spawn` with subcommands: `list` shows history, `result <id>` retrieves output, `<task>` runs in separate context; `SpawnHistory` tracks results (Day 19) |
 | Parallel tool execution | ✅ | ✅ | yoagent 0.6's default `ToolExecutionStrategy::Parallel` runs tools concurrently |
-| Tool output streaming | 🟡 | ✅ | `ToolExecutionUpdate` events handled; markdown streaming fixed (Day 17); no real-time subprocess streaming yet |
+| Tool output streaming | ✅ | ✅ | `StreamingBashTool` streams subprocess output line-by-line via `ToolContext.on_update` (Day 19); markdown streaming fixed (Day 17) |
 
 ## CLI & UX
 
@@ -86,7 +86,9 @@ This document tracks the feature gap between yoyo and Claude Code, used to infor
 | PR description generation | ✅ | ✅ | `/pr create [--draft]` generates AI-powered PR descriptions |
 | Commit message generation | ✅ | ✅ | `/commit` with heuristic-based message generation from staged diff (Day 8) |
 | Code review | ✅ | ✅ | `/review` provides AI-powered code review of staged/unstaged changes (Day 13) |
-| Multi-file refactoring | 🟡 | ✅ | yoyo can via tools; Claude Code is better at coordinating |
+| Multi-file refactoring | ✅ | ✅ | `/refactor` builds coordinated multi-file prompts with coupling analysis, function cross-refs, and source previews (Day 20) |
+| Web research | ✅ | ❌ | `/research` fetches web results via DuckDuckGo Lite, strips HTML, optionally saves to RESEARCH.md (Day 20) |
+| Knowledge brain | ✅ | ❌ | `/brain status/gaps/learn` — 6 domain skills, connection graph, pattern tracking; auto-wired into /evolve cycle (Day 20) |
 
 ## Configuration
 
@@ -106,7 +108,7 @@ This document tracks the feature gap between yoyo and Claude Code, used to infor
 | API error display | ✅ | ✅ | Shows error messages |
 | Network retry | ✅ | ✅ | yoagent handles 3 retries with exponential backoff by default |
 | Rate limit handling | ✅ | ✅ | yoagent respects retry-after headers on 429s |
-| Graceful degradation | 🟡 | ✅ | yoyo has retry logic and error handling; not yet full fallback on partial failures |
+| Graceful degradation | ✅ | ✅ | Retry logic + `has_useful_content()` detects partial success in failed tool results; shows ⚠ (partial) instead of ✗ (Day 19) |
 | Ctrl+C handling | ✅ | ✅ | Both handle interrupts |
 
 ---
@@ -115,10 +117,30 @@ This document tracks the feature gap between yoyo and Claude Code, used to infor
 
 Based on this analysis, the highest-impact missing features are:
 
-1. **Richer subagent orchestration** — Better task decomposition and result aggregation for /spawn
-2. **Full graceful degradation** — Fallback behavior on partial tool failures
+1. **Active brain context injection** — Brain patterns should feed into active reasoning context (like SCA Context Lens in target architecture)
+2. **Multi-model routing** — Support local models (vLLM/Ollama) alongside cloud APIs via unified dispatch
+3. **API gateway / VS Code extension** — Enable non-CLI client interfaces
 
 Recently completed:
+
+- ✅ `/refactor` multi-file refactoring (Day 20) — coordinated prompts with coupling analysis and cross-refs
+- ✅ `/research` web search (Day 20) — DuckDuckGo Lite integration with HTML stripping
+- ✅ `/brain` knowledge system (Day 20) — status/gaps/learn subcommands, 6 domain skills, auto-wired into /evolve
+- ✅ Runtime error throttling (Day 20) — escalating dedup windows (2s→30s→5min) to prevent noise
+- ✅ Brain/research tests (Day 21) — 34 new tests for /brain, /research, /refactor commands
+- ✅ SESSION_START_SHA fix (Day 21) — unbound variable in evolve-ide.sh finish phase
+- ✅ `/changelog` command (Day 19) — git log grouped by day for release notes
+- ✅ `/gap` live stats (Day 19) — auto-counts tests, files, commands from source
+- ✅ `/timing` command (Day 19) — session duration history from JSONL data
+- ✅ `/errors compact` (Day 19) — error log compaction with category aggregation and 7-day truncation
+- ✅ Session timing/outcome data pipeline (Day 19) — evolve-ide.sh writes to JSONL during verify/finish
+- ✅ Subagent orchestration (Day 19) — `/spawn list`, `/spawn result <id>`, `SpawnHistory` tracking
+- ✅ Graceful degradation (Day 19) — `has_useful_content()` detects partial success, shows ⚠ (partial)
+- ✅ Multi-language error classification (Day 19) — Python, Node, Go classifiers with fix strategies
+- ✅ Function-level coupling (Day 19) — `detect_function_refs()` tracks cross-file symbol references
+- ✅ StreamingBashTool (Day 19) — real-time subprocess output streaming via `ToolContext.on_update`
+- ✅ Convergence metrics (Day 19) — `/stats` shows revert rate, test growth, activity trend, convergence verdict
+- ✅ Task confidence scoring (Day 19) — `/confidence` scores SESSION_PLAN.md tasks by familiarity
 - ✅ True token-by-token streaming (Day 17) — fixed line-buffering bug in MarkdownRenderer; mid-line tokens now render immediately
 - ✅ Parallel tool execution (Day 15) — already supported via yoagent 0.6's `ToolExecutionStrategy::Parallel`
 - ✅ Project memory system (Day 15) — `/remember`, `/recall`, `/forget` for persistent cross-session memory
@@ -155,9 +177,9 @@ Recently completed:
 
 ## Stats
 
-- yoyo: ~15,100 lines of Rust across 12 source files + integration tests
-- 636 tests passing (569 unit + 67 integration)
-- 38 REPL commands (including /spawn, /find, /docs, /fix, /lint, /pr, /review, /init, /mark, /jump, /marks, /index)
+- yoyo: ~25,800 lines of Rust across 17 source files + integration tests
+- 899 tests passing (831 unit + 68 integration)
+- 53 REPL commands (from KNOWN_COMMANDS)
 - 25 CLI flags (+ short aliases)
 - 10+ provider backends
 - MCP server support
@@ -172,3 +194,10 @@ Recently completed:
 - Conversation bookmarks (/mark, /jump, /marks)
 - Codebase indexing (/index)
 - Argument-aware tab completion
+- StreamingBashTool with real-time subprocess output
+- Convergence metrics (/stats)
+- Task confidence scoring (/confidence)
+- Latent space connection graph (/graph)
+- Multi-language error classification (Python, Node, Go)
+- Function-level file coupling (/coupling)
+- Graceful degradation on partial tool failures

@@ -124,7 +124,9 @@ cargo install --path .
 cargo install yoyo
 ``` -->
 
-### Run
+### Run as a coding assistant
+
+Use yoyo like any CLI coding tool — it works with any LLM provider:
 
 ```bash
 # Interactive REPL (default)
@@ -154,6 +156,49 @@ yoyo -p "generate a config" -o config.toml
 # Auto-approve all tool use
 yoyo --yes
 ```
+
+### Run self-evolution from your IDE
+
+To trigger yoyo's self-improvement loop from inside any IDE agent — no API key
+needed, the IDE provides the LLM:
+
+**Claude Code** (fully autonomous):
+```
+/project:evolve
+```
+That's it. The custom slash command drives the entire pipeline — setup, read source,
+plan, implement tasks, verify, reply to issues, journal, push. No manual steps.
+
+**Other IDEs** (Cursor, Windsurf, etc.):
+```bash
+./scripts/evolve-ide.sh all
+# Then follow the instructions printed to stdout
+```
+
+The full pipeline:
+
+1. **Setup** (automatic) — verifies build, checks CI status, fetches GitHub issues
+   (community, self-filed, help-wanted), scans for pending replies, loads identity context
+2. **Read source** — IDE reads `src/*.rs`, `JOURNAL.md`, `ISSUES_TODAY.md`, learnings
+3. **Plan** — IDE creates `SESSION_PLAN.md` with tasks + issue responses
+4. **Task loop** — for each task: `next-task` → implement → `verify-task` (auto-reverts on failure)
+5. **Finish** — posts replies to GitHub issues, verifies final build, writes journal, tags, pushes
+
+For manual step-by-step control:
+
+```bash
+./scripts/evolve-ide.sh setup        # 1. Build check, fetch issues → .evolve/plan_prompt.md
+                                     # 2. Read .evolve/plan_prompt.md → create SESSION_PLAN.md
+./scripts/evolve-ide.sh next-task    # 3. Get next task → .evolve/task_prompt.md
+                                     # 4. Read .evolve/task_prompt.md → implement + commit
+./scripts/evolve-ide.sh verify-task  # 5. Verification gate (build, tests, protected files)
+                                     # 6. Repeat 3-5 until next-task says "done"
+./scripts/evolve-ide.sh finish       # 7. Journal, issue responses, tag, push
+```
+
+Run `./scripts/evolve-ide.sh help` for details.
+
+See [How It Evolves](#how-it-evolves) for the full picture of CI vs IDE modes.
 
 ### Configure
 
@@ -225,8 +270,12 @@ Create a `YOYO.md` (or `CLAUDE.md`) in your project root with build commands, ar
 
 ## How It Evolves
 
+yoyo has two evolution modes:
+
+### CI Mode (`evolve.sh`) — Autonomous, runs in GitHub Actions
+
 ```
-Every 8 hours, yoyo wakes up and:
+Every 4-8 hours, yoyo wakes up and:
     → Reads its own source code
     → Checks GitHub issues for community input
     → Plans what to improve
@@ -234,14 +283,68 @@ Every 8 hours, yoyo wakes up and:
     → If tests pass → commit. If not → revert.
     → Replies to issues as 🐙 yoyo-evolve[bot]
     → Pushes and goes back to sleep
+```
 
+### IDE Mode (`evolve-ide.sh`) — Autonomous, runs inside your coding agent
+
+When you run yoyo's evolution from inside an IDE agent (Claude Code, Cursor, etc.),
+there's no need for the yoyo binary — the IDE agent already has all the tools.
+
+In Claude Code, just type `/project:evolve` — a custom slash command
+(`.claude/commands/evolve.md`) drives the entire cycle autonomously.
+
+For other IDEs, `./scripts/evolve-ide.sh` provides the infrastructure
+(build checks, issue fetching, verification gates, rollbacks, issue posting,
+tagging, pushing) while the IDE agent handles the LLM work (reading code,
+planning, implementing, committing).
+
+```
+The IDE agent wakes up and:
+    → Verifies build passes (cargo build + cargo test)
+    → Checks previous CI status for failures
+    → Fetches GitHub issues (community, self-filed, help-wanted)
+    → Scans for pending replies on previously touched issues
+    → Reads its own source code (src/*.rs)
+    → Reads JOURNAL.md and ISSUES_TODAY.md
+    → Plans what to improve → SESSION_PLAN.md
+    → Implements each task, runs tests
+    → If tests pass → commit. If not → auto-revert + file issue.
+    → Replies to GitHub issues as 🐙 yoyo-evolve
+    → Writes journal entry and reflections
+    → Tags the known-good state and pushes
+```
+
+For manual step-by-step control, use individual subcommands:
+
+```bash
+./scripts/evolve-ide.sh setup        # Build check, CI, fetch issues
+./scripts/evolve-ide.sh next-task    # Extract next task from plan
+./scripts/evolve-ide.sh verify-task  # Verification gate (build, tests)
+./scripts/evolve-ide.sh finish       # Journal, issues, tag, push
+```
+
+Environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BRANCH` | current branch | Git branch to push to |
+| `REPO` | `Qonsult1001/EvolveLAM` | GitHub repo for issues/CI |
+| `TIMEOUT` | `600` | Planning phase time budget (seconds) |
+
+### Social sessions
+
+```
 Every 4 hours (offset), yoyo runs a social session:
     → Reads GitHub Discussions
     → Replies to conversations it's part of
     → Joins new discussions if it has something real to say
     → Occasionally starts its own discussion
     → Learns from interacting with humans
+```
 
+### Memory synthesis
+
+```
 Daily, a synthesis job regenerates active memory:
     → Reads JSONL archives (learnings + social learnings)
     → Applies time-weighted compression (recent=full, old=themed)
@@ -327,11 +430,13 @@ src/                    12 modules, ~14,700 lines of Rust
 tests/
   integration.rs        67 subprocess-based integration tests
 docs/                   mdbook source (book.toml + src/)
+.evolve/                gitignored IDE evolution artifacts (plan_prompt.md, task_prompt.md, runbook.md — local only, not pushed)
 site/                   gitignored build output (built by CI Pages workflow)
   index.html            Journey homepage (built by build_site.py)
   book/                 mdbook output
 scripts/
-  evolve.sh             Evolution pipeline (plan → implement → respond)
+  evolve.sh             CI evolution pipeline (plan → implement → respond)
+  evolve-ide.sh         IDE evolution orchestrator (phased, no yoyo binary needed)
   social.sh             Social session (discussions → reply → learn)
   format_issues.py      Issue selection & formatting
   format_discussions.py Discussion fetching & formatting (GraphQL)

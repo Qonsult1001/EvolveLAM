@@ -47,6 +47,33 @@ if [ -f "$_YOYO_REPO/memory/active_social_learnings.md" ]; then
     _SOCIAL_LEARNINGS=$(cat "$_YOYO_REPO/memory/active_social_learnings.md") || _SOCIAL_LEARNINGS=""
 fi
 
+# Latent space connections — summarize top connections by weight
+_CONNECTIONS=""
+if [ -f "$_YOYO_REPO/memory/connections.jsonl" ]; then
+    _CONNECTIONS=$(python3 -c "
+import json, sys
+conns = []
+for line in open('$_YOYO_REPO/memory/connections.jsonl'):
+    line = line.strip()
+    if not line: continue
+    try: conns.append(json.loads(line))
+    except: pass
+if not conns:
+    sys.exit(0)
+conns.sort(key=lambda c: c.get('weight', 0), reverse=True)
+nodes = set()
+for c in conns:
+    nodes.add(c['from'])
+    nodes.add(c['to'])
+total_act = sum(c.get('activations', 0) for c in conns)
+print(f'Nodes: {len(nodes)} | Connections: {len(conns)} | Total activations: {total_act}')
+print()
+for c in conns[:15]:
+    kind = c.get('kind', '?')
+    print(f'- {c[\"from\"]} -> {c[\"to\"]} (w:{c[\"weight\"]:.2f}, {c[\"activations\"]}x, {kind})')
+" 2>/dev/null) || _CONNECTIONS=""
+fi
+
 YOYO_CONTEXT="=== WHO YOU ARE ===
 
 ${_IDENTITY:-Read IDENTITY.md for your rules and constitution.}
@@ -61,4 +88,8 @@ ${_LEARNINGS:-No learnings yet.}
 
 === SOCIAL WISDOM ===
 
-${_SOCIAL_LEARNINGS:-No social learnings yet.}"
+${_SOCIAL_LEARNINGS:-No social learnings yet.}
+
+=== LATENT SPACE ===
+
+${_CONNECTIONS:-No connections yet. Use the ConnectionGraph API in src/memory.rs to build associative memory.}"

@@ -1,500 +1,10 @@
-//! REPL command handlers for yoyo.
+//! REPL command dispatch hub.
 //!
-//! Each `/command` in the interactive REPL is handled by a function in this module.
-//! The main loop dispatches to these handlers, keeping main.rs as a thin REPL driver.
+//! Re-exports all command handlers from focused submodules so that repl.rs
+//! can use `commands::handle_*` for everything.
 
-// All handle_* functions in this module are dispatched from the REPL in main.rs.
-
-use crate::cli::{default_model_for_provider, KNOWN_PROVIDERS};
-use crate::cli::{is_verbose, AUTO_COMPACT_THRESHOLD, MAX_CONTEXT_TOKENS, VERSION};
-use crate::format::*;
-use crate::git::*;
-use crate::prompt::*;
-
-use yoagent::agent::Agent;
-use yoagent::context::total_tokens;
-use yoagent::*;
-
-/// Known REPL command prefixes. Used to detect unknown slash commands
-/// and for tab-completion in the REPL.
-pub const KNOWN_COMMANDS: &[&str] = &[
-    "/help",
-    "/quit",
-    "/exit",
-    "/clear",
-    "/compact",
-    "/commit",
-    "/cost",
-    "/docs",
-    "/find",
-    "/fix",
-    "/forget",
-    "/index",
-    "/status",
-    "/tokens",
-    "/save",
-    "/load",
-    "/diff",
-    "/undo",
-    "/health",
-    "/retry",
-    "/history",
-    "/search",
-    "/model",
-    "/think",
-    "/config",
-    "/context",
-    "/init",
-    "/version",
-    "/run",
-    "/tree",
-    "/pr",
-    "/git",
-    "/test",
-    "/lint",
-    "/spawn",
-    "/review",
-    "/mark",
-    "/jump",
-    "/marks",
-    "/remember",
-    "/memories",
-    "/provider",
-];
-
-/// Well-known model names for `/model <Tab>` completion.
-pub const KNOWN_MODELS: &[&str] = &[
-    "claude-sonnet-4-20250514",
-    "claude-opus-4-20250514",
-    "claude-haiku-35-20241022",
-    "gpt-4o",
-    "gpt-4o-mini",
-    "gpt-4.1",
-    "gpt-4.1-mini",
-    "o3",
-    "o3-mini",
-    "o4-mini",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash",
-    "deepseek-chat",
-    "deepseek-reasoner",
-];
-
-/// Thinking level names for `/think <Tab>` completion.
-pub const THINKING_LEVELS: &[&str] = &["off", "minimal", "low", "medium", "high"];
-
-/// Git subcommand names for `/git <Tab>` completion.
-pub const GIT_SUBCOMMANDS: &[&str] = &["status", "log", "add", "diff", "branch", "stash"];
-
-/// PR subcommand names for `/pr <Tab>` completion.
-pub const PR_SUBCOMMANDS: &[&str] = &["list", "view", "diff", "comment", "create", "checkout"];
-
-/// Return context-aware argument completions for a given command and partial argument.
-///
-/// `cmd` is the slash command (e.g. "/model"), `partial_arg` is what the user has typed
-/// after the command + space so far. Returns a list of candidate completions.
-pub fn command_arg_completions(cmd: &str, partial_arg: &str) -> Vec<String> {
-    let partial_lower = partial_arg.to_lowercase();
-    match cmd {
-        "/model" => filter_candidates(KNOWN_MODELS, &partial_lower),
-        "/think" => filter_candidates(THINKING_LEVELS, &partial_lower),
-        "/git" => filter_candidates(GIT_SUBCOMMANDS, &partial_lower),
-        "/pr" => filter_candidates(PR_SUBCOMMANDS, &partial_lower),
-        "/provider" => filter_candidates(KNOWN_PROVIDERS, &partial_lower),
-        "/save" | "/load" => list_json_files(partial_arg),
-        _ => Vec::new(),
-    }
-}
-
-/// Filter a list of candidates by a lowercase prefix.
-fn filter_candidates(candidates: &[&str], partial_lower: &str) -> Vec<String> {
-    candidates
-        .iter()
-        .filter(|c| c.to_lowercase().starts_with(partial_lower))
-        .map(|c| c.to_string())
-        .collect()
-}
-
-/// List .json files in the current directory matching a partial prefix.
-fn list_json_files(partial: &str) -> Vec<String> {
-    let entries = match std::fs::read_dir(".") {
-        Ok(entries) => entries,
-        Err(_) => return Vec::new(),
-    };
-    let mut matches: Vec<String> = entries
-        .flatten()
-        .filter_map(|entry| {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name.ends_with(".json") && name.starts_with(partial) {
-                Some(name)
-            } else {
-                None
-            }
-        })
-        .collect();
-    matches.sort();
-    matches
-}
-
-/// Check if a slash-prefixed input is an unknown command.
-/// Extracts the first word and checks against known commands.
-pub fn is_unknown_command(input: &str) -> bool {
-    let cmd = input.split_whitespace().next().unwrap_or(input);
-    !KNOWN_COMMANDS.contains(&cmd)
-}
-
-/// Format a ThinkingLevel as a display string.
-pub fn thinking_level_name(level: ThinkingLevel) -> &'static str {
-    match level {
-        ThinkingLevel::Off => "off",
-        ThinkingLevel::Minimal => "minimal",
-        ThinkingLevel::Low => "low",
-        ThinkingLevel::Medium => "medium",
-        ThinkingLevel::High => "high",
-    }
-}
-
-// ── /help ────────────────────────────────────────────────────────────────
-
-/// Build help text as a String so it's testable.
-pub fn help_text() -> String {
-    let mut out = String::new();
-
-    // ── Session ──
-    out.push_str("  ── Session ──\n");
-    out.push_str("  /help              Show this help\n");
-    out.push_str("  /quit, /exit       Exit yoyo\n");
-    out.push_str("  /clear             Clear conversation history\n");
-    out.push_str("  /compact           Compact conversation to save context space\n");
-    out.push_str("  /save [path]       Save session to file (default: yoyo-session.json)\n");
-    out.push_str("  /load [path]       Load session from file\n");
-    out.push_str("  /retry             Re-send the last user input\n");
-    out.push_str("  /status            Show session info\n");
-    out.push_str("  /tokens            Show token usage and context window\n");
-    out.push_str("  /cost              Show estimated session cost\n");
-    out.push_str("  /config            Show all current settings\n");
-    out.push_str("  /version           Show yoyo version\n");
-    out.push_str("  /history           Show summary of conversation messages\n");
-    out.push_str("  /search <query>    Search conversation history for matching messages\n");
-    out.push_str("  /mark <name>       Bookmark current conversation state\n");
-    out.push_str(
-        "  /jump <name>       Restore conversation to a bookmark (discards messages after it)\n",
-    );
-    out.push_str("  /marks             List all saved bookmarks\n");
-    out.push('\n');
-
-    // ── Git ──
-    out.push_str("  ── Git ──\n");
-    out.push_str("  /git <subcmd>      Quick git: status, log, add, diff, branch, stash\n");
-    out.push_str("  /diff              Show file summary, change stats, and full diff\n");
-    out.push_str("  /undo              Revert all uncommitted changes (git checkout)\n");
-    out.push_str("  /commit [msg]      Commit staged changes (AI-generates message if no msg)\n");
-    out.push_str("  /pr [number]       List open PRs, view, diff, comment, or checkout a PR\n");
-    out.push_str(
-        "                     /pr create [--draft] | /pr <n> diff | /pr <n> comment <text>\n",
-    );
-    out.push_str(
-        "  /review [path]     AI code review: staged changes (default) or a specific file\n",
-    );
-    out.push('\n');
-
-    // ── Project ──
-    out.push_str("  ── Project ──\n");
-    out.push_str("  /context           Show loaded project context files\n");
-    out.push_str("  /init              Scan project and generate a YOYO.md context file\n");
-    out.push_str("  /health            Run project health checks (auto-detects project type)\n");
-    out.push_str(
-        "  /fix               Auto-fix build/lint errors (runs checks, sends failures to AI)\n",
-    );
-    out.push_str(
-        "  /test              Auto-detect and run project tests (cargo test, npm test, etc.)\n",
-    );
-    out.push_str(
-        "  /lint              Auto-detect and run project linter (clippy, eslint, ruff, etc.)\n",
-    );
-    out.push_str("  /run <cmd>         Run a shell command directly (no AI, no tokens)\n");
-    out.push_str("  !<cmd>             Shortcut for /run\n");
-    out.push_str("  /docs <crate> [item] Look up docs.rs documentation for a Rust crate\n");
-    out.push_str("  /find <pattern>    Fuzzy-search project files by name\n");
-    out.push_str("  /index             Build a lightweight index of project source files\n");
-    out.push_str("  /tree [depth]      Show project directory tree (default depth: 3)\n");
-    out.push('\n');
-
-    // ── AI ──
-    out.push_str("  ── AI ──\n");
-    out.push_str("  /model <name>      Switch model (preserves conversation)\n");
-    out.push_str("  /provider <name>   Switch provider (resets model to provider default)\n");
-    out.push_str("  /think [level]     Show or change thinking level (off/low/medium/high)\n");
-    out.push_str("  /spawn <task>      Spawn a subagent to handle a task (separate context)\n");
-    out.push_str(
-        "  /remember <note>   Save a project-specific memory (persists across sessions)\n",
-    );
-    out.push_str("  /memories          List project-specific memories for this directory\n");
-    out.push_str("  /forget <n>        Remove a project memory by index\n");
-    out.push('\n');
-
-    // ── Input ──
-    out.push_str("  ── Input ──\n");
-    out.push_str("  End a line with \\ to continue on the next line\n");
-    out.push_str("  Start with ``` to enter a fenced code block\n");
-
-    out
-}
-
-pub fn handle_help() {
-    println!("{DIM}{}{RESET}", help_text());
-}
-
-// ── /version ─────────────────────────────────────────────────────────────
-
-pub fn handle_version() {
-    println!("{DIM}  yoyo v{VERSION}{RESET}\n");
-}
-
-// ── /status ──────────────────────────────────────────────────────────────
-
-pub fn handle_status(model: &str, cwd: &str, session_total: &Usage) {
-    println!("{DIM}  model:   {model}");
-    if let Some(branch) = git_branch() {
-        println!("  git:     {branch}");
-    }
-    println!("  cwd:     {cwd}");
-    println!(
-        "  tokens:  {} in / {} out (session total){RESET}\n",
-        session_total.input, session_total.output
-    );
-}
-
-// ── /tokens ──────────────────────────────────────────────────────────────
-
-pub fn handle_tokens(agent: &Agent, session_total: &Usage, model: &str) {
-    let max_context = MAX_CONTEXT_TOKENS;
-    let messages = agent.messages().to_vec();
-    let context_used = total_tokens(&messages) as u64;
-    let bar = context_bar(context_used, max_context);
-
-    println!("{DIM}  Context window:");
-    println!("    messages:    {}", messages.len());
-    println!(
-        "    context:     {} / {} tokens",
-        format_token_count(context_used),
-        format_token_count(max_context)
-    );
-    println!("    {bar}");
-    if context_used as f64 / max_context as f64 > 0.75 {
-        println!("    {YELLOW}⚠ Context is getting full. Consider /clear or /compact.{RESET}");
-    }
-    println!();
-    println!("  Session totals:");
-    println!(
-        "    input:       {} tokens",
-        format_token_count(session_total.input)
-    );
-    println!(
-        "    output:      {} tokens",
-        format_token_count(session_total.output)
-    );
-    println!(
-        "    cache read:  {} tokens",
-        format_token_count(session_total.cache_read)
-    );
-    println!(
-        "    cache write: {} tokens",
-        format_token_count(session_total.cache_write)
-    );
-    if let Some(cost) = estimate_cost(session_total, model) {
-        println!("    est. cost:   {}", format_cost(cost));
-    }
-    println!("{RESET}");
-}
-
-// ── /cost ────────────────────────────────────────────────────────────────
-
-pub fn handle_cost(session_total: &Usage, model: &str) {
-    if let Some(cost) = estimate_cost(session_total, model) {
-        println!("{DIM}  Session cost: {}", format_cost(cost));
-        println!(
-            "    {} in / {} out",
-            format_token_count(session_total.input),
-            format_token_count(session_total.output)
-        );
-        if session_total.cache_read > 0 || session_total.cache_write > 0 {
-            println!(
-                "    cache: {} read / {} write",
-                format_token_count(session_total.cache_read),
-                format_token_count(session_total.cache_write)
-            );
-        }
-        if let Some((input_cost, cw_cost, cr_cost, output_cost)) =
-            cost_breakdown(session_total, model)
-        {
-            println!();
-            println!("    Breakdown:");
-            println!("      input:       {}", format_cost(input_cost));
-            println!("      output:      {}", format_cost(output_cost));
-            if cw_cost > 0.0 {
-                println!("      cache write: {}", format_cost(cw_cost));
-            }
-            if cr_cost > 0.0 {
-                println!("      cache read:  {}", format_cost(cr_cost));
-            }
-        }
-        println!("{RESET}");
-    } else {
-        println!("{DIM}  Cost estimation not available for model '{model}'.{RESET}\n");
-    }
-}
-
-// ── /retry ───────────────────────────────────────────────────────────────
-
-pub async fn handle_retry(
-    agent: &mut Agent,
-    last_input: &Option<String>,
-    session_total: &mut Usage,
-    model: &str,
-) {
-    match last_input {
-        Some(prev) => {
-            println!("{DIM}  (retrying last input){RESET}");
-            let retry_input = prev.clone();
-            run_prompt(agent, &retry_input, session_total, model).await;
-            auto_compact_if_needed(agent);
-        }
-        None => {
-            eprintln!("{DIM}  (nothing to retry — no previous input){RESET}\n");
-        }
-    }
-}
-
-// ── /model ───────────────────────────────────────────────────────────────
-
-pub fn handle_model_show(model: &str) {
-    println!("{DIM}  current model: {model}");
-    println!("  usage: /model <name>{RESET}\n");
-}
-
-// ── /provider ────────────────────────────────────────────────────────────
-
-pub fn handle_provider_show(provider: &str) {
-    println!("{DIM}  current provider: {provider}");
-    println!("  usage: /provider <name>");
-    println!("  available: {}{RESET}\n", KNOWN_PROVIDERS.join(", "));
-}
-
-pub fn handle_provider_switch(
-    new_provider: &str,
-    agent_config: &mut crate::AgentConfig,
-    agent: &mut Agent,
-) {
-    if !KNOWN_PROVIDERS.contains(&new_provider) {
-        eprintln!("{RED}  unknown provider: '{new_provider}'{RESET}");
-        eprintln!("{DIM}  available: {}{RESET}\n", KNOWN_PROVIDERS.join(", "));
-        return;
-    }
-    agent_config.provider = new_provider.to_string();
-    agent_config.model = default_model_for_provider(new_provider);
-    let saved = agent.save_messages().ok();
-    *agent = agent_config.build_agent();
-    if let Some(json) = saved {
-        let _ = agent.restore_messages(&json);
-    }
-    println!(
-        "{DIM}  (switched to provider '{}', model '{}', conversation preserved){RESET}\n",
-        agent_config.provider, agent_config.model
-    );
-}
-
-// ── /think ───────────────────────────────────────────────────────────────
-
-pub fn handle_think_show(thinking: ThinkingLevel) {
-    let level_str = thinking_level_name(thinking);
-    println!("{DIM}  thinking: {level_str}");
-    println!("  usage: /think <off|minimal|low|medium|high>{RESET}\n");
-}
-
-// ── /config ──────────────────────────────────────────────────────────────
-
-#[allow(clippy::too_many_arguments)]
-pub fn handle_config(
-    provider: &str,
-    model: &str,
-    base_url: &Option<String>,
-    thinking: ThinkingLevel,
-    max_tokens: Option<u32>,
-    max_turns: Option<usize>,
-    temperature: Option<f32>,
-    skills: &yoagent::skills::SkillSet,
-    system_prompt: &str,
-    mcp_count: u32,
-    openapi_count: u32,
-    agent: &Agent,
-    cwd: &str,
-) {
-    println!("{DIM}  Configuration:");
-    println!("    provider:   {provider}");
-    println!("    model:      {model}");
-    if let Some(ref url) = base_url {
-        println!("    base_url:   {url}");
-    }
-    println!("    thinking:   {}", thinking_level_name(thinking));
-    println!(
-        "    max_tokens: {}",
-        max_tokens
-            .map(|m| m.to_string())
-            .unwrap_or_else(|| "default (8192)".to_string())
-    );
-    println!(
-        "    max_turns:  {}",
-        max_turns
-            .map(|m| m.to_string())
-            .unwrap_or_else(|| "default (50)".to_string())
-    );
-    println!(
-        "    temperature: {}",
-        temperature
-            .map(|t| format!("{t:.1}"))
-            .unwrap_or_else(|| "default".to_string())
-    );
-    println!(
-        "    skills:     {}",
-        if skills.is_empty() {
-            "none".to_string()
-        } else {
-            format!("{} loaded", skills.len())
-        }
-    );
-    let system_preview =
-        truncate_with_ellipsis(system_prompt.lines().next().unwrap_or("(empty)"), 60);
-    println!("    system:     {system_preview}");
-    if mcp_count > 0 {
-        println!("    mcp:        {mcp_count} server(s)");
-    }
-    if openapi_count > 0 {
-        println!("    openapi:    {openapi_count} spec(s)");
-    }
-    println!(
-        "    verbose:    {}",
-        if is_verbose() { "on" } else { "off" }
-    );
-    if let Some(branch) = git_branch() {
-        println!("    git:        {branch}");
-    }
-    println!("    cwd:        {cwd}");
-    println!(
-        "    context:    {} max tokens",
-        format_token_count(MAX_CONTEXT_TOKENS)
-    );
-    println!(
-        "    auto-compact: at {:.0}%",
-        AUTO_COMPACT_THRESHOLD * 100.0
-    );
-    println!("    messages:   {}", agent.messages().len());
-    println!(
-        "    session:    auto-save on exit ({})",
-        crate::cli::AUTO_SAVE_SESSION_PATH
-    );
-    println!("{RESET}");
-}
+// Core handlers: constants, completion, help, status, tokens, cost, model, provider, think, config
+pub use crate::commands_core::*;
 
 // ── Re-exports from submodules ────────────────────────────────────────────
 // These re-exports keep the public API stable so repl.rs continues to work
@@ -502,131 +12,60 @@ pub fn handle_config(
 
 // Git-related handlers
 pub use crate::commands_git::{
-    handle_commit, handle_diff, handle_git, handle_pr, handle_review, handle_undo,
+    handle_blame, handle_changelog, handle_commit, handle_diff, handle_git, handle_pr,
+    handle_review, handle_undo,
 };
 
 // Project-related handlers
 pub use crate::commands_project::{
-    handle_context, handle_docs, handle_find, handle_fix, handle_health, handle_index, handle_init,
-    handle_lint, handle_run, handle_run_usage, handle_test, handle_tree,
+    handle_ast, handle_context, handle_coupling, handle_docs, handle_doctor, handle_errors,
+    handle_find, handle_fix, handle_gap, handle_health, handle_hypotheses, handle_index,
+    handle_init, handle_lint, handle_refactor, handle_research, handle_run, handle_run_usage,
+    handle_runtime_errors, handle_test, handle_tree,
 };
 
 // Session-related handlers
 pub use crate::commands_session::{
-    auto_compact_if_needed, auto_save_on_exit, handle_compact, handle_history, handle_jump,
-    handle_load, handle_mark, handle_marks, handle_save, handle_search, handle_spawn,
-    last_session_exists, Bookmarks,
+    auto_compact_if_needed, auto_save_on_exit, handle_compact, handle_confidence, handle_history,
+    handle_jump, handle_load, handle_mark, handle_marks, handle_save, handle_search, handle_spawn,
+    handle_stats, handle_timing, last_session_exists, load_bookmarks,
 };
 
-// Memory-related handlers
-pub use crate::memory::{add_memory, load_memories, remove_memory, save_memories};
-
-// ── /remember ────────────────────────────────────────────────────────────
-
-pub fn handle_remember(input: &str) {
-    let note = input
-        .strip_prefix("/remember")
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    if note.is_empty() {
-        println!("{DIM}  usage: /remember <note>");
-        println!("  Save a project-specific memory that persists across sessions.");
-        println!("  Examples:");
-        println!("    /remember this project uses sqlx for database access");
-        println!("    /remember tests require docker running");
-        println!("    /remember always run cargo fmt before committing{RESET}\n");
-        return;
-    }
-    let mut memory = load_memories();
-    add_memory(&mut memory, &note);
-    match save_memories(&memory) {
-        Ok(_) => {
-            println!(
-                "{GREEN}  ✓ Remembered: \"{note}\" ({} total memories){RESET}\n",
-                memory.entries.len()
-            );
-        }
-        Err(e) => {
-            eprintln!("{RED}  error saving memory: {e}{RESET}\n");
-        }
-    }
-}
-
-// ── /memories ────────────────────────────────────────────────────────────
-
-pub fn handle_memories() {
-    let memory = load_memories();
-    if memory.entries.is_empty() {
-        println!("{DIM}  No project memories yet.");
-        println!("  Use /remember <note> to add one.{RESET}\n");
-        return;
-    }
-    println!("{DIM}  Project memories ({}):", memory.entries.len());
-    for (i, entry) in memory.entries.iter().enumerate() {
-        println!("    [{i}] {} ({})", entry.note, entry.timestamp);
-    }
-    println!("  Use /forget <n> to remove a memory.{RESET}\n");
-}
-
-// ── /forget ──────────────────────────────────────────────────────────────
-
-pub fn handle_forget(input: &str) {
-    let arg = input.strip_prefix("/forget").unwrap_or("").trim();
-    if arg.is_empty() {
-        println!("{DIM}  usage: /forget <n>");
-        println!("  Remove a project memory by index. Use /memories to see indexes.{RESET}\n");
-        return;
-    }
-    let index = match arg.parse::<usize>() {
-        Ok(i) => i,
-        Err(_) => {
-            eprintln!("{RED}  error: '{arg}' is not a valid index. Use /memories to see indexes.{RESET}\n");
-            return;
-        }
-    };
-    let mut memory = load_memories();
-    match remove_memory(&mut memory, index) {
-        Some(removed) => match save_memories(&memory) {
-            Ok(_) => {
-                println!(
-                    "{GREEN}  ✓ Forgot: \"{}\" ({} memories remaining){RESET}\n",
-                    removed.note,
-                    memory.entries.len()
-                );
-            }
-            Err(e) => {
-                eprintln!("{RED}  error saving memory: {e}{RESET}\n");
-            }
-        },
-        None => {
-            eprintln!(
-                "{RED}  error: index {index} out of range (have {} memories). Use /memories to see indexes.{RESET}\n",
-                memory.entries.len()
-            );
-        }
-    }
-}
+// Memory-related re-exports for test access
+#[cfg(test)]
+pub use crate::memory::add_memory_force;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli::KNOWN_PROVIDERS;
     use crate::commands_git::{
         build_review_content, build_review_prompt, format_diff_stat, parse_diff_stat,
         parse_pr_args, DiffStatEntry, DiffStatSummary, PrSubcommand,
     };
     use crate::commands_project::{
-        build_commands_for_project, build_fix_prompt, build_project_tree, detect_project_name,
-        detect_project_type, extract_first_meaningful_line, find_files, format_project_index,
-        format_tree_from_paths, fuzzy_score, generate_init_content, health_checks_for_project,
-        highlight_match, is_binary_extension, lint_command_for_project,
-        run_health_check_for_project, run_health_checks_full_output, run_shell_command,
-        scan_important_dirs, scan_important_files, test_command_for_project, IndexEntry,
-        ProjectType,
+        build_commands_for_project, build_fix_prompt, build_project_tree, classify_failure_oneline,
+        classify_go_error, classify_node_error, classify_python_error, classify_rust_error,
+        compact_error_log, compute_fix_rates, detect_project_name, detect_project_type,
+        detect_recurring_errors, extract_first_meaningful_line, find_files, fix_strategy,
+        format_error_classification, format_errors_display, format_generic_categories,
+        format_health_timing_summary, format_hypotheses_display, format_project_index,
+        format_tree_from_paths, fuzzy_score, generate_init_content, generic_fix_strategy,
+        health_checks_for_project, highlight_match, is_binary_extension, lint_command_for_project,
+        parse_error_log, parse_hypotheses, parse_test_summary, run_health_check_for_project,
+        run_health_checks_full_output, run_health_checks_with_classification, run_shell_command,
+        scan_important_dirs, scan_important_files, summarize_error_log, test_command_for_project,
+        truncate_category, ErrorLogEntry, GenericErrorCategory, Hypothesis, IndexEntry,
+        ProjectType, RustErrorCategory, TestSummary,
     };
-    use crate::commands_session::{parse_bookmark_name, parse_spawn_task};
+    use crate::commands_project::{
+        collect_gap_stats, format_gap_stats, round_to_hundreds, GapStats,
+    };
+    use crate::commands_session::{
+        parse_bookmark_name, parse_spawn_subcommand, Bookmarks, SpawnCommand, SpawnHistory,
+    };
     use crate::memory::{
-        format_memories_for_prompt, load_memories_from, MemoryEntry, ProjectMemory,
+        format_memories_for_prompt, load_memories_from, remove_memory, MemoryEntry, ProjectMemory,
     };
     use yoagent::ThinkingLevel;
 
@@ -1025,7 +464,8 @@ mod tests {
         let checks = health_checks_for_project(&ProjectType::Python);
         let names: Vec<&str> = checks.iter().map(|(n, _)| *n).collect();
         assert!(names.contains(&"lint"), "Python should have lint check");
-        assert!(names.contains(&"typecheck"), "Python should have typecheck");
+        // typecheck only included if mypy is available on the system
+        // assert!(names.contains(&"typecheck"), "Python should have typecheck");
     }
 
     #[test]
@@ -1404,6 +844,11 @@ mod tests {
             prompt.contains("unused variable"),
             "Prompt should include clippy warning"
         );
+        // New: should contain error classification
+        assert!(
+            prompt.contains("Error categories"),
+            "Prompt should include error classification"
+        );
     }
 
     #[test]
@@ -1414,6 +859,79 @@ mod tests {
             prompt.is_empty() || prompt.contains("Fix"),
             "Empty failures should produce empty or minimal prompt"
         );
+    }
+
+    #[test]
+    fn test_classify_rust_error_missing_import() {
+        let output = "error[E0433]: failed to resolve: cannot find value `foo` in this scope\n  --> src/main.rs:10:5";
+        let cats = classify_rust_error(output);
+        assert_eq!(cats[0].0, RustErrorCategory::MissingImport);
+    }
+
+    #[test]
+    fn test_classify_rust_error_type_mismatch() {
+        let output = "error[E0308]: mismatched types\n  --> src/main.rs:42\n  |\n42 |     let x: i32 = \"hello\";\n   |                  expected i32, found &str";
+        let cats = classify_rust_error(output);
+        assert_eq!(cats[0].0, RustErrorCategory::TypeMismatch);
+    }
+
+    #[test]
+    fn test_classify_rust_error_borrow() {
+        let output =
+            "error[E0502]: cannot borrow `x` as mutable because it is also borrowed as immutable";
+        let cats = classify_rust_error(output);
+        assert_eq!(cats[0].0, RustErrorCategory::BorrowChecker);
+    }
+
+    #[test]
+    fn test_classify_rust_error_unused() {
+        let output = "warning: unused variable: `x`\n  --> src/main.rs:5\n  = note: `#[warn(unused_variables)]` on by default";
+        let cats = classify_rust_error(output);
+        assert_eq!(cats[0].0, RustErrorCategory::Unused);
+    }
+
+    #[test]
+    fn test_classify_rust_error_test_failure() {
+        let output = "test tests::my_test ... FAILED\n\nfailures:\n\n---- tests::my_test stdout ----\nthread 'tests::my_test' panicked at 'assertion failed: x == 5'";
+        let cats = classify_rust_error(output);
+        assert_eq!(cats[0].0, RustErrorCategory::TestFailure);
+    }
+
+    #[test]
+    fn test_classify_rust_error_unknown() {
+        let output = "some random error that doesn't match any pattern";
+        let cats = classify_rust_error(output);
+        assert_eq!(cats[0].0, RustErrorCategory::Unknown);
+    }
+
+    #[test]
+    fn test_classify_rust_error_multiple_categories() {
+        let output = "error: cannot find value `foo` in this scope\nwarning: unused variable `bar`\nwarning: unused import `baz`";
+        let cats = classify_rust_error(output);
+        // Should have both MissingImport and Unused
+        let cat_names: Vec<RustErrorCategory> = cats.iter().map(|(c, _)| *c).collect();
+        assert!(cat_names.contains(&RustErrorCategory::MissingImport));
+        assert!(cat_names.contains(&RustErrorCategory::Unused));
+    }
+
+    #[test]
+    fn test_fix_strategy_returns_nonempty() {
+        let categories = [
+            RustErrorCategory::MissingImport,
+            RustErrorCategory::TypeMismatch,
+            RustErrorCategory::BorrowChecker,
+            RustErrorCategory::Unused,
+            RustErrorCategory::TestFailure,
+            RustErrorCategory::Format,
+            RustErrorCategory::Clippy,
+            RustErrorCategory::Unknown,
+        ];
+        for cat in &categories {
+            assert!(
+                !fix_strategy(*cat).is_empty(),
+                "Strategy for {cat} should not be empty"
+            );
+        }
     }
 
     #[test]
@@ -1531,9 +1049,10 @@ mod tests {
         let cmd = lint_command_for_project(&ProjectType::Python);
         assert!(cmd.is_some(), "Python project should have a lint command");
         let (label, _args) = cmd.unwrap();
+        // Prefers ruff if available, falls back to flake8
         assert!(
-            label.contains("ruff"),
-            "Python lint label should mention ruff"
+            label.contains("ruff") || label.contains("flake8"),
+            "Python lint label should mention ruff or flake8, got: {label}"
         );
     }
 
@@ -1624,30 +1143,85 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_spawn_task_with_task() {
-        let task = parse_spawn_task("/spawn read src/main.rs and summarize");
-        assert_eq!(task, Some("read src/main.rs and summarize".to_string()));
-    }
-
-    #[test]
-    fn test_parse_spawn_task_empty() {
-        let task = parse_spawn_task("/spawn");
-        assert_eq!(task, None);
-    }
-
-    #[test]
-    fn test_parse_spawn_task_whitespace_only() {
-        let task = parse_spawn_task("/spawn   ");
-        assert_eq!(task, None);
-    }
-
-    #[test]
-    fn test_parse_spawn_task_preserves_full_task() {
-        let task = parse_spawn_task("/spawn analyze src/ and list all public functions");
+    fn test_parse_spawn_subcommand_task() {
+        let cmd = parse_spawn_subcommand("/spawn read src/main.rs and summarize");
         assert_eq!(
-            task,
-            Some("analyze src/ and list all public functions".to_string())
+            cmd,
+            SpawnCommand::Task("read src/main.rs and summarize".to_string())
         );
+    }
+
+    #[test]
+    fn test_parse_spawn_subcommand_empty() {
+        let cmd = parse_spawn_subcommand("/spawn");
+        assert_eq!(cmd, SpawnCommand::Help);
+    }
+
+    #[test]
+    fn test_parse_spawn_subcommand_list() {
+        let cmd = parse_spawn_subcommand("/spawn list");
+        assert_eq!(cmd, SpawnCommand::List);
+    }
+
+    #[test]
+    fn test_parse_spawn_subcommand_ls() {
+        let cmd = parse_spawn_subcommand("/spawn ls");
+        assert_eq!(cmd, SpawnCommand::List);
+    }
+
+    #[test]
+    fn test_parse_spawn_subcommand_result() {
+        let cmd = parse_spawn_subcommand("/spawn result 3");
+        assert_eq!(cmd, SpawnCommand::ShowResult(3));
+    }
+
+    #[test]
+    fn test_spawn_history_add_and_get() {
+        let mut history = SpawnHistory::new();
+        assert_eq!(history.len(), 0);
+        let id = history.add("test task".to_string(), "test result".to_string());
+        assert_eq!(id, 1);
+        assert_eq!(history.len(), 1);
+        let record = history.get(1).unwrap();
+        assert_eq!(record.task, "test task");
+        assert_eq!(record.result, "test result");
+    }
+
+    #[test]
+    fn test_spawn_history_format_list_empty() {
+        let history = SpawnHistory::new();
+        let display = history.format_list();
+        assert!(display.contains("No spawns"));
+    }
+
+    #[test]
+    fn test_spawn_history_format_list_with_entries() {
+        let mut history = SpawnHistory::new();
+        history.add("first task".to_string(), "first result".to_string());
+        history.add("second task".to_string(), "second result".to_string());
+        let display = history.format_list();
+        assert!(display.contains("2 spawn(s)"));
+        assert!(display.contains("#1"));
+        assert!(display.contains("#2"));
+    }
+
+    #[test]
+    fn test_spawn_history_aggregate() {
+        let mut history = SpawnHistory::new();
+        history.add("task one".to_string(), "result one".to_string());
+        history.add("task two".to_string(), "result two".to_string());
+        let agg = history.aggregate(&[1, 2]);
+        assert!(agg.contains("Spawn #1"));
+        assert!(agg.contains("Spawn #2"));
+        assert!(agg.contains("result one"));
+        assert!(agg.contains("result two"));
+    }
+
+    #[test]
+    fn test_spawn_history_aggregate_missing_ids() {
+        let history = SpawnHistory::new();
+        let agg = history.aggregate(&[99]);
+        assert!(agg.contains("no matching"));
     }
 
     #[test]
@@ -2401,6 +1975,46 @@ mod tests {
         assert!(!jump_matches("/jumping"));
     }
 
+    #[test]
+    fn test_save_and_load_bookmarks_roundtrip() {
+        use crate::commands_session::{load_bookmarks_from, save_bookmarks_to};
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bookmarks.json");
+
+        let mut bookmarks = Bookmarks::new();
+        bookmarks.insert("start".to_string(), r#"[{"role":"user"}]"#.to_string());
+        bookmarks.insert("mid".to_string(), r#"[{"role":"assistant"}]"#.to_string());
+
+        save_bookmarks_to(&bookmarks, &path).unwrap();
+        let loaded = load_bookmarks_from(&path);
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded.get("start").unwrap(), r#"[{"role":"user"}]"#);
+        assert_eq!(loaded.get("mid").unwrap(), r#"[{"role":"assistant"}]"#);
+    }
+
+    #[test]
+    fn test_load_bookmarks_missing_file() {
+        use crate::commands_session::load_bookmarks_from;
+
+        let path = std::path::Path::new("/tmp/nonexistent_yoyo_bookmarks.json");
+        let loaded = load_bookmarks_from(path);
+        assert!(loaded.is_empty());
+    }
+
+    #[test]
+    fn test_save_bookmarks_empty() {
+        use crate::commands_session::save_bookmarks_to;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bookmarks.json");
+
+        let bookmarks = Bookmarks::new();
+        save_bookmarks_to(&bookmarks, &path).unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("{}") || content.contains("{\n}"));
+    }
+
     // ── command_arg_completions tests ─────────────────────────────────────
 
     #[test]
@@ -2449,6 +2063,22 @@ mod tests {
         assert!(
             candidates.is_empty(),
             "Should return no matches for nonsense"
+        );
+    }
+
+    #[test]
+    fn test_known_models_includes_current_claude_ids() {
+        assert!(
+            KNOWN_MODELS.contains(&"claude-opus-4-6"),
+            "Should include claude-opus-4-6"
+        );
+        assert!(
+            KNOWN_MODELS.contains(&"claude-sonnet-4-6"),
+            "Should include claude-sonnet-4-6"
+        );
+        assert!(
+            KNOWN_MODELS.contains(&"claude-haiku-4-5-20251001"),
+            "Should include claude-haiku-4-5-20251001"
         );
     }
 
@@ -2736,9 +2366,9 @@ mod tests {
         let mut mem = load_memories_from(&path);
         assert!(mem.entries.is_empty());
 
-        // Add
-        add_memory(&mut mem, "uses sqlx");
-        add_memory(&mut mem, "docker needed");
+        // Add (use force to bypass dedup for short test strings)
+        add_memory_force(&mut mem, "uses sqlx");
+        add_memory_force(&mut mem, "docker needed");
         assert_eq!(mem.entries.len(), 2);
 
         // Save & reload
@@ -2929,5 +2559,1066 @@ mod tests {
             input_section.contains("```"),
             "Input section should mention fenced code blocks"
         );
+    }
+
+    #[test]
+    fn test_graph_subcommands_tab_completion() {
+        let completions = command_arg_completions("/graph", "");
+        assert!(completions.contains(&"downstream".to_string()));
+        assert!(completions.contains(&"neighbors".to_string()));
+        assert!(completions.contains(&"info".to_string()));
+        assert!(completions.contains(&"activate".to_string()));
+        assert!(completions.contains(&"path".to_string()));
+    }
+
+    #[test]
+    fn test_graph_subcommands_filtered() {
+        let completions = command_arg_completions("/graph", "d");
+        assert!(completions.contains(&"downstream".to_string()));
+        assert!(!completions.contains(&"info".to_string()));
+    }
+
+    #[test]
+    fn test_help_text_contains_graph() {
+        let text = help_text();
+        assert!(
+            text.contains("/graph"),
+            "Help text should document /graph command"
+        );
+        assert!(
+            text.contains("downstream"),
+            "Help text should mention downstream subcommand"
+        );
+    }
+
+    #[test]
+    fn test_is_unknown_command_graph() {
+        assert!(!is_unknown_command("/graph"));
+        assert!(!is_unknown_command("/graph downstream foo"));
+    }
+
+    #[test]
+    fn test_is_unknown_command_coupling() {
+        assert!(!is_unknown_command("/coupling"));
+    }
+
+    #[test]
+    fn test_graph_path_tab_completion() {
+        let completions = command_arg_completions("/graph", "p");
+        assert!(completions.contains(&"path".to_string()));
+    }
+
+    #[test]
+    fn test_help_text_contains_coupling() {
+        let text = help_text();
+        assert!(
+            text.contains("/coupling"),
+            "Help text should document /coupling command"
+        );
+    }
+
+    // ── format_error_classification tests ─────────────────────────────
+
+    #[test]
+    fn test_format_error_classification_shows_categories() {
+        let error = "error[E0432]: unresolved import `crate::foo`\nerror: cannot find value `bar` in this scope";
+        let failures = vec![("build", error)];
+        let output = format_error_classification(&failures);
+        assert!(
+            output.contains("missing_import"),
+            "Should show missing_import category: {output}"
+        );
+        assert!(output.contains("build"), "Should show check name: {output}");
+    }
+
+    #[test]
+    fn test_format_error_classification_shows_strategy() {
+        let error = "error: cannot borrow `x` as mutable";
+        let failures = vec![("build", error)];
+        let output = format_error_classification(&failures);
+        assert!(
+            output.contains("ownership"),
+            "Should include borrow_checker strategy hint: {output}"
+        );
+    }
+
+    #[test]
+    fn test_format_error_classification_empty_on_no_failures() {
+        let failures: Vec<(&str, &str)> = vec![];
+        let output = format_error_classification(&failures);
+        assert!(output.is_empty(), "No failures should produce empty output");
+    }
+
+    #[test]
+    fn test_format_error_classification_skips_unknown_only() {
+        let error = "some random error that doesn't match any pattern";
+        let failures = vec![("build", error)];
+        let output = format_error_classification(&failures);
+        assert!(
+            output.is_empty(),
+            "Unknown-only errors should not produce classification output: {output}"
+        );
+    }
+
+    // ── classify_failure_oneline tests ─────────────────────────────────
+
+    #[test]
+    fn test_classify_failure_oneline_missing_import() {
+        let error = "error[E0433]: cannot find value `foo` in this scope";
+        let line = classify_failure_oneline("build", error);
+        assert!(
+            line.contains("missing_import"),
+            "Should detect missing_import: {line}"
+        );
+        assert!(line.starts_with("→"), "Should start with arrow: {line}");
+        assert!(
+            line.contains("—"),
+            "Should include strategy separator: {line}"
+        );
+    }
+
+    #[test]
+    fn test_classify_failure_oneline_borrow_checker() {
+        let error = "error: cannot borrow `x` as mutable, as it is not declared as mutable";
+        let line = classify_failure_oneline("clippy", error);
+        assert!(
+            line.contains("borrow_checker"),
+            "Should detect borrow_checker: {line}"
+        );
+    }
+
+    #[test]
+    fn test_classify_failure_oneline_empty_on_unknown() {
+        let error = "some random error text";
+        let line = classify_failure_oneline("build", error);
+        assert!(
+            line.is_empty(),
+            "Unknown errors should return empty string: {line}"
+        );
+    }
+
+    #[test]
+    fn test_classify_failure_oneline_empty_on_empty_input() {
+        let line = classify_failure_oneline("build", "");
+        assert!(
+            line.is_empty(),
+            "Empty input should return empty string: {line}"
+        );
+    }
+
+    #[test]
+    fn test_run_health_checks_with_classification_returns_tuples() {
+        // Verifies the function signature works and returns 5-tuples (with Duration)
+        let results = run_health_checks_with_classification(&ProjectType::Unknown);
+        assert!(
+            results.is_empty(),
+            "Unknown project type should have no checks"
+        );
+    }
+
+    // ── Health timing summary tests ──────────────────────────────────
+
+    #[test]
+    fn test_format_health_timing_summary_empty() {
+        let results: Vec<(&str, bool, String, String, std::time::Duration)> = vec![];
+        let summary = format_health_timing_summary(&results);
+        assert!(summary.is_empty());
+    }
+
+    #[test]
+    fn test_format_health_timing_summary_single_check() {
+        let results = vec![(
+            "cargo build",
+            true,
+            "ok (1.2s)".to_string(),
+            String::new(),
+            std::time::Duration::from_millis(1200),
+        )];
+        let summary = format_health_timing_summary(&results);
+        assert!(summary.contains("Health check completed in"));
+        assert!(summary.contains("cargo build:"));
+    }
+
+    #[test]
+    fn test_format_health_timing_summary_multiple_checks() {
+        let results = vec![
+            (
+                "cargo build",
+                true,
+                "ok (2.0s)".to_string(),
+                String::new(),
+                std::time::Duration::from_millis(2000),
+            ),
+            (
+                "cargo test",
+                true,
+                "ok (3.5s)".to_string(),
+                String::new(),
+                std::time::Duration::from_millis(3500),
+            ),
+            (
+                "cargo clippy",
+                false,
+                "FAIL (1.0s)".to_string(),
+                "→ 2 clippy".to_string(),
+                std::time::Duration::from_millis(1000),
+            ),
+        ];
+        let summary = format_health_timing_summary(&results);
+        // Total should be ~6.5s
+        assert!(summary.contains("Health check completed in 6.5s"));
+        assert!(summary.contains("cargo build: 2.0s"));
+        assert!(summary.contains("cargo test: 3.5s"));
+        assert!(summary.contains("cargo clippy: 1.0s"));
+    }
+
+    // ── parse_test_summary tests ──────────────────────────────────────
+
+    #[test]
+    fn test_parse_test_summary_single_result_line() {
+        let output = "test result: ok. 42 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 1.23s\n";
+        let summary = parse_test_summary(output);
+        assert_eq!(
+            summary,
+            Some(TestSummary {
+                passed: 42,
+                failed: 0,
+                ignored: 3
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_test_summary_multiple_result_lines() {
+        // Simulates unit tests + integration tests output
+        let output = "\
+running 684 tests
+...
+test result: ok. 684 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.42s
+
+running 67 tests
+...
+test result: ok. 67 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 2.78s
+";
+        let summary = parse_test_summary(output);
+        assert_eq!(
+            summary,
+            Some(TestSummary {
+                passed: 751,
+                failed: 0,
+                ignored: 1
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_test_summary_failed_result() {
+        let output = "test result: FAILED. 10 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.5s\n";
+        let summary = parse_test_summary(output);
+        assert_eq!(
+            summary,
+            Some(TestSummary {
+                passed: 10,
+                failed: 2,
+                ignored: 0
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_test_summary_no_result_lines() {
+        let output = "Compiling yoyo v0.1.0\nsome random output\n";
+        let summary = parse_test_summary(output);
+        assert!(
+            summary.is_none(),
+            "Should return None when no test result lines found"
+        );
+    }
+
+    #[test]
+    fn test_parse_test_summary_empty_input() {
+        let summary = parse_test_summary("");
+        assert!(summary.is_none());
+    }
+
+    // ── Error log tests ──────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_error_log_single_entry() {
+        let line = r#"{"ts":"2026-03-19T06:30:00Z","day":19,"categories":{"missing_import":3,"borrow_checker":1},"source":"fix"}"#;
+        let entries = parse_error_log(line);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].ts, "2026-03-19T06:30:00Z");
+        assert_eq!(entries[0].day, 19);
+        assert_eq!(entries[0].source, "fix");
+        assert_eq!(entries[0].categories.len(), 2);
+        assert_eq!(entries[0].categories[0], ("missing_import".to_string(), 3));
+        assert_eq!(entries[0].categories[1], ("borrow_checker".to_string(), 1));
+        assert_eq!(entries[0].resolved, None); // old entries without resolved field
+    }
+
+    #[test]
+    fn test_parse_error_log_with_resolved_field() {
+        let line = r#"{"ts":"2026-03-19T06:30:00Z","day":19,"categories":{"missing_import":2},"source":"fix","resolved":"true"}"#;
+        let entries = parse_error_log(line);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].resolved, Some(true));
+
+        let line2 = r#"{"ts":"2026-03-19T06:30:00Z","day":19,"categories":{"missing_import":2},"source":"fix","resolved":"false"}"#;
+        let entries2 = parse_error_log(line2);
+        assert_eq!(entries2[0].resolved, Some(false));
+    }
+
+    #[test]
+    fn test_parse_error_log_multiple_entries() {
+        let content = r#"{"ts":"2026-03-18T12:00:00Z","day":18,"categories":{"type_mismatch":2},"source":"fix"}
+{"ts":"2026-03-19T06:30:00Z","day":19,"categories":{"unused":5,"clippy":1},"source":"fix"}"#;
+        let entries = parse_error_log(content);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].day, 18);
+        assert_eq!(entries[1].day, 19);
+    }
+
+    #[test]
+    fn test_parse_error_log_empty_and_blank_lines() {
+        let content = "\n\n  \n";
+        let entries = parse_error_log(content);
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn test_summarize_error_log_aggregates() {
+        let entries = vec![
+            ErrorLogEntry {
+                ts: "2026-03-18T12:00:00Z".to_string(),
+                day: 18,
+                categories: vec![
+                    ("missing_import".to_string(), 3),
+                    ("borrow_checker".to_string(), 1),
+                ],
+                source: "fix".to_string(),
+                resolved: None,
+                fixed_categories: vec![],
+            },
+            ErrorLogEntry {
+                ts: "2026-03-19T06:00:00Z".to_string(),
+                day: 19,
+                categories: vec![
+                    ("missing_import".to_string(), 2),
+                    ("type_mismatch".to_string(), 4),
+                ],
+                source: "fix".to_string(),
+                resolved: None,
+                fixed_categories: vec![],
+            },
+        ];
+        let totals = summarize_error_log(&entries);
+        assert_eq!(totals[0].0, "missing_import");
+        assert_eq!(totals[0].1, 5);
+        assert_eq!(totals[1].0, "type_mismatch");
+        assert_eq!(totals[1].1, 4);
+        assert_eq!(totals[2].0, "borrow_checker");
+        assert_eq!(totals[2].1, 1);
+    }
+
+    #[test]
+    fn test_format_errors_display_empty() {
+        let display = format_errors_display(&[]);
+        assert!(display.contains("No error log entries"));
+    }
+
+    #[test]
+    fn test_format_errors_display_shows_all_sections() {
+        let entries = vec![
+            ErrorLogEntry {
+                ts: "2026-03-18T12:00:00Z".to_string(),
+                day: 18,
+                categories: vec![("missing_import".to_string(), 3)],
+                source: "fix".to_string(),
+                resolved: None,
+                fixed_categories: vec![],
+            },
+            ErrorLogEntry {
+                ts: "2026-03-19T06:00:00Z".to_string(),
+                day: 19,
+                categories: vec![
+                    ("borrow_checker".to_string(), 2),
+                    ("missing_import".to_string(), 1),
+                ],
+                source: "fix".to_string(),
+                resolved: None,
+                fixed_categories: vec![],
+            },
+        ];
+        let display = format_errors_display(&entries);
+        assert!(display.contains("Error totals"));
+        assert!(display.contains("missing_import: 4"));
+        assert!(display.contains("borrow_checker: 2"));
+        assert!(display.contains("Most common: missing_import"));
+        assert!(display.contains("Recent events"));
+        assert!(display.contains("2026-03-19T06:00:00Z"));
+        assert!(display.contains("2026-03-18T12:00:00Z"));
+    }
+
+    #[test]
+    fn test_parse_error_log_malformed_line_skipped() {
+        let content = r#"not valid json
+{"ts":"2026-03-19T06:30:00Z","day":19,"categories":{"unused":1},"source":"fix"}"#;
+        let entries = parse_error_log(content);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].categories[0].0, "unused");
+    }
+
+    #[test]
+    fn test_compute_fix_rates_mixed_resolved() {
+        let entries = vec![
+            ErrorLogEntry {
+                ts: "t1".to_string(),
+                day: 19,
+                categories: vec![("missing_import".to_string(), 3)],
+                source: "fix".to_string(),
+                resolved: Some(true),
+                fixed_categories: vec![],
+            },
+            ErrorLogEntry {
+                ts: "t2".to_string(),
+                day: 19,
+                categories: vec![
+                    ("missing_import".to_string(), 2),
+                    ("borrow_checker".to_string(), 1),
+                ],
+                source: "fix".to_string(),
+                resolved: Some(false),
+                fixed_categories: vec![],
+            },
+        ];
+        let rates = compute_fix_rates(&entries);
+        // missing_import: 5 total, 3 resolved
+        let mi = rates
+            .iter()
+            .find(|(c, _, _)| c == "missing_import")
+            .unwrap();
+        assert_eq!(mi.1, 5);
+        assert_eq!(mi.2, 3);
+        // borrow_checker: 1 total, 0 resolved
+        let bc = rates
+            .iter()
+            .find(|(c, _, _)| c == "borrow_checker")
+            .unwrap();
+        assert_eq!(bc.1, 1);
+        assert_eq!(bc.2, 0);
+    }
+
+    #[test]
+    fn test_compute_fix_rates_none_resolved_treated_as_unresolved() {
+        let entries = vec![ErrorLogEntry {
+            ts: "t1".to_string(),
+            day: 18,
+            categories: vec![("type_mismatch".to_string(), 4)],
+            source: "fix".to_string(),
+            resolved: None,
+            fixed_categories: vec![],
+        }];
+        let rates = compute_fix_rates(&entries);
+        assert_eq!(rates[0], ("type_mismatch".to_string(), 4, 0));
+    }
+
+    #[test]
+    fn test_format_errors_display_shows_fix_rates() {
+        let entries = vec![
+            ErrorLogEntry {
+                ts: "2026-03-18T12:00:00Z".to_string(),
+                day: 18,
+                categories: vec![("missing_import".to_string(), 3)],
+                source: "fix".to_string(),
+                resolved: Some(true),
+                fixed_categories: vec![],
+            },
+            ErrorLogEntry {
+                ts: "2026-03-19T06:00:00Z".to_string(),
+                day: 19,
+                categories: vec![("missing_import".to_string(), 2)],
+                source: "fix".to_string(),
+                resolved: Some(false),
+                fixed_categories: vec![],
+            },
+        ];
+        let display = format_errors_display(&entries);
+        assert!(display.contains("Fix success rates"));
+        assert!(display.contains("missing_import: 3/5"));
+        assert!(display.contains("60%"));
+    }
+
+    #[test]
+    fn test_format_errors_display_resolved_markers() {
+        let entries = vec![
+            ErrorLogEntry {
+                ts: "2026-03-18T12:00:00Z".to_string(),
+                day: 18,
+                categories: vec![("unused".to_string(), 1)],
+                source: "fix".to_string(),
+                resolved: Some(true),
+                fixed_categories: vec![],
+            },
+            ErrorLogEntry {
+                ts: "2026-03-19T06:00:00Z".to_string(),
+                day: 19,
+                categories: vec![("unused".to_string(), 1)],
+                source: "fix".to_string(),
+                resolved: Some(false),
+                fixed_categories: vec![],
+            },
+        ];
+        let display = format_errors_display(&entries);
+        // Recent events should show ✓ and ✗ markers
+        assert!(display.contains("✓"));
+        assert!(display.contains("✗"));
+    }
+
+    // ── Hypothesis tests ────────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_hypotheses_basic() {
+        let line = r#"{"ts":"2026-03-19T08:00:00Z","day":19,"error_category":"borrow_checker","hypothesis":"Recurring borrow issue","testable_by":"Check ownership flow"}"#;
+        let hypotheses = parse_hypotheses(line);
+        assert_eq!(hypotheses.len(), 1);
+        assert_eq!(hypotheses[0].error_category, "borrow_checker");
+        assert_eq!(hypotheses[0].hypothesis, "Recurring borrow issue");
+        assert_eq!(hypotheses[0].testable_by, "Check ownership flow");
+    }
+
+    #[test]
+    fn test_parse_hypotheses_empty() {
+        assert!(parse_hypotheses("").is_empty());
+        assert!(parse_hypotheses("\n\n").is_empty());
+    }
+
+    #[test]
+    fn test_detect_recurring_errors_finds_patterns() {
+        let entries = vec![
+            ErrorLogEntry {
+                ts: "t1".to_string(),
+                day: 19,
+                categories: vec![("borrow_checker".to_string(), 1)],
+                source: "fix".to_string(),
+                resolved: Some(false),
+                fixed_categories: vec![],
+            },
+            ErrorLogEntry {
+                ts: "t2".to_string(),
+                day: 19,
+                categories: vec![("borrow_checker".to_string(), 1)],
+                source: "fix".to_string(),
+                resolved: Some(false),
+                fixed_categories: vec![],
+            },
+        ];
+        let recurring = detect_recurring_errors(&entries);
+        assert_eq!(recurring.len(), 1);
+        assert_eq!(recurring[0].0, "borrow_checker");
+        assert_eq!(recurring[0].1, 2);
+    }
+
+    #[test]
+    fn test_detect_recurring_errors_ignores_resolved() {
+        let entries = vec![
+            ErrorLogEntry {
+                ts: "t1".to_string(),
+                day: 19,
+                categories: vec![("borrow_checker".to_string(), 1)],
+                source: "fix".to_string(),
+                resolved: Some(true),
+                fixed_categories: vec![],
+            },
+            ErrorLogEntry {
+                ts: "t2".to_string(),
+                day: 19,
+                categories: vec![("borrow_checker".to_string(), 1)],
+                source: "fix".to_string(),
+                resolved: Some(true),
+                fixed_categories: vec![],
+            },
+        ];
+        let recurring = detect_recurring_errors(&entries);
+        assert!(recurring.is_empty());
+    }
+
+    #[test]
+    fn test_parse_error_log_with_fixed_categories() {
+        let line = r#"{"ts":"2026-03-19T10:00:00Z","day":19,"categories":{"missing_import":2},"source":"fix","resolved":"true","fixed_categories":["missing_import","borrow_checker"]}"#;
+        let entries = parse_error_log(line);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].resolved, Some(true));
+        assert_eq!(entries[0].fixed_categories.len(), 2);
+        assert_eq!(entries[0].fixed_categories[0], "missing_import");
+        assert_eq!(entries[0].fixed_categories[1], "borrow_checker");
+    }
+
+    #[test]
+    fn test_parse_error_log_without_fixed_categories() {
+        let line = r#"{"ts":"2026-03-19T10:00:00Z","day":19,"categories":{"missing_import":2},"source":"fix","resolved":"false"}"#;
+        let entries = parse_error_log(line);
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].fixed_categories.is_empty());
+    }
+
+    #[test]
+    fn test_format_errors_display_shows_fixed_categories() {
+        let entries = vec![ErrorLogEntry {
+            ts: "2026-03-19T10:00:00Z".to_string(),
+            day: 19,
+            categories: vec![("missing_import".to_string(), 2)],
+            source: "fix".to_string(),
+            resolved: Some(true),
+            fixed_categories: vec!["missing_import".to_string()],
+        }];
+        let display = format_errors_display(&entries);
+        assert!(display.contains("fixed: missing_import"));
+    }
+
+    #[test]
+    fn test_format_hypotheses_display_empty() {
+        let display = format_hypotheses_display(&[]);
+        assert!(display.contains("No failure hypotheses"));
+    }
+
+    #[test]
+    fn test_format_hypotheses_display_shows_entries() {
+        let hypotheses = vec![Hypothesis {
+            ts: "2026-03-19T08:00:00Z".to_string(),
+            day: 19,
+            error_category: "borrow_checker".to_string(),
+            hypothesis: "Recurring issue".to_string(),
+            testable_by: "Check ownership".to_string(),
+        }];
+        let display = format_hypotheses_display(&hypotheses);
+        assert!(display.contains("1 recorded"));
+        assert!(display.contains("borrow_checker"));
+        assert!(display.contains("Recurring issue"));
+        assert!(display.contains("Check ownership"));
+    }
+
+    // ── Multi-language error classification tests ─────────────────────
+
+    #[test]
+    fn test_classify_python_syntax_error() {
+        let output = "  File \"main.py\", line 5\n    print(\"hello\"\nSyntaxError: unexpected EOF while parsing\n";
+        let cats = classify_python_error(output);
+        assert!(cats
+            .iter()
+            .any(|(c, _)| *c == GenericErrorCategory::SyntaxError));
+    }
+
+    #[test]
+    fn test_classify_python_import_error() {
+        let output = "Traceback (most recent call last):\n  File \"main.py\", line 1, in <module>\nImportError: No module named 'nonexistent'\n";
+        let cats = classify_python_error(output);
+        assert!(cats
+            .iter()
+            .any(|(c, _)| *c == GenericErrorCategory::ImportError));
+    }
+
+    #[test]
+    fn test_classify_python_type_error() {
+        let output = "TypeError: unsupported operand type(s) for +: 'int' and 'str'\n";
+        let cats = classify_python_error(output);
+        assert!(cats
+            .iter()
+            .any(|(c, _)| *c == GenericErrorCategory::TypeError));
+    }
+
+    #[test]
+    fn test_classify_python_name_error() {
+        let output = "NameError: name 'foo' is not defined\n";
+        let cats = classify_python_error(output);
+        assert!(cats
+            .iter()
+            .any(|(c, _)| *c == GenericErrorCategory::NameError));
+    }
+
+    #[test]
+    fn test_classify_python_indentation_error() {
+        let output = "IndentationError: unexpected indent\n";
+        let cats = classify_python_error(output);
+        assert!(cats
+            .iter()
+            .any(|(c, _)| *c == GenericErrorCategory::IndentationError));
+    }
+
+    #[test]
+    fn test_classify_node_syntax_error() {
+        let output = "SyntaxError: Unexpected token }\n    at Module._compile\n";
+        let cats = classify_node_error(output);
+        assert!(cats
+            .iter()
+            .any(|(c, _)| *c == GenericErrorCategory::SyntaxError));
+    }
+
+    #[test]
+    fn test_classify_node_reference_error() {
+        let output = "ReferenceError: foo is not defined\n    at Object.<anonymous>\n";
+        let cats = classify_node_error(output);
+        assert!(cats
+            .iter()
+            .any(|(c, _)| *c == GenericErrorCategory::ReferenceError));
+    }
+
+    #[test]
+    fn test_classify_node_type_error() {
+        let output = "TypeError: Cannot read properties of undefined (reading 'length')\n";
+        let cats = classify_node_error(output);
+        assert!(cats
+            .iter()
+            .any(|(c, _)| *c == GenericErrorCategory::TypeError));
+    }
+
+    #[test]
+    fn test_classify_node_module_not_found() {
+        let output = "Error: Cannot find module 'express'\n    at Module._resolveFilename\nERR_MODULE_NOT_FOUND\n";
+        let cats = classify_node_error(output);
+        assert!(cats
+            .iter()
+            .any(|(c, _)| *c == GenericErrorCategory::ModuleNotFound));
+    }
+
+    #[test]
+    fn test_classify_go_undefined() {
+        let output = "./main.go:10:2: undefined: fmt\n";
+        let cats = classify_go_error(output);
+        assert!(cats
+            .iter()
+            .any(|(c, _)| *c == GenericErrorCategory::UndefinedSymbol));
+    }
+
+    #[test]
+    fn test_classify_go_cannot_use() {
+        let output = "./main.go:15:10: cannot use x (type int) as type string\n";
+        let cats = classify_go_error(output);
+        assert!(cats
+            .iter()
+            .any(|(c, _)| *c == GenericErrorCategory::TypeError));
+    }
+
+    #[test]
+    fn test_classify_go_unused_import() {
+        let output = "./main.go:3:2: \"fmt\" imported and not used\n";
+        let cats = classify_go_error(output);
+        assert!(cats
+            .iter()
+            .any(|(c, _)| *c == GenericErrorCategory::UnusedImport));
+    }
+
+    #[test]
+    fn test_classify_go_test_failure() {
+        let output = "--- FAIL: TestAdd (0.00s)\n    main_test.go:10: expected 5, got 4\nFAIL\tgithub.com/test/pkg\t0.001s\n";
+        let cats = classify_go_error(output);
+        assert!(cats
+            .iter()
+            .any(|(c, _)| *c == GenericErrorCategory::TestFailure));
+    }
+
+    #[test]
+    fn test_classify_python_unknown_fallback() {
+        let output = "some random output\n";
+        let cats = classify_python_error(output);
+        assert_eq!(cats.len(), 1);
+        assert_eq!(cats[0].0, GenericErrorCategory::Unknown);
+    }
+
+    #[test]
+    fn test_format_generic_categories_non_empty() {
+        let cats = vec![
+            (GenericErrorCategory::SyntaxError, 2),
+            (GenericErrorCategory::ImportError, 1),
+        ];
+        let result = format_generic_categories(&cats);
+        assert!(result.contains("syntax_error(2)"));
+        assert!(result.contains("import_error(1)"));
+    }
+
+    #[test]
+    fn test_format_generic_categories_unknown_only() {
+        let cats = vec![(GenericErrorCategory::Unknown, 1)];
+        let result = format_generic_categories(&cats);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_generic_fix_strategy_returns_nonempty() {
+        let strategy = generic_fix_strategy(GenericErrorCategory::SyntaxError);
+        assert!(!strategy.is_empty());
+        let strategy = generic_fix_strategy(GenericErrorCategory::ImportError);
+        assert!(!strategy.is_empty());
+    }
+
+    #[test]
+    fn test_generic_error_category_display() {
+        assert_eq!(
+            format!("{}", GenericErrorCategory::SyntaxError),
+            "syntax_error"
+        );
+        assert_eq!(
+            format!("{}", GenericErrorCategory::ImportError),
+            "import_error"
+        );
+        assert_eq!(format!("{}", GenericErrorCategory::TypeError), "type_error");
+        assert_eq!(
+            format!("{}", GenericErrorCategory::ModuleNotFound),
+            "module_not_found"
+        );
+        assert_eq!(
+            format!("{}", GenericErrorCategory::UndefinedSymbol),
+            "undefined_symbol"
+        );
+    }
+
+    // ── /gap tests ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_round_to_hundreds() {
+        assert_eq!(round_to_hundreds(24774), "24,800");
+        assert_eq!(round_to_hundreds(100), "0,100");
+        assert_eq!(round_to_hundreds(0), "0,000");
+        assert_eq!(round_to_hundreds(999), "1,000");
+        assert_eq!(round_to_hundreds(1050), "1,100");
+    }
+
+    #[test]
+    fn test_collect_gap_stats_has_data() {
+        let stats = collect_gap_stats();
+        // We know this codebase has source files and tests
+        assert!(stats.file_count > 0);
+        assert!(stats.total_lines > 0);
+        assert!(stats.unit_tests > 0);
+        assert!(stats.command_count > 40);
+    }
+
+    #[test]
+    fn test_format_gap_stats() {
+        let stats = GapStats {
+            file_count: 17,
+            total_lines: 25000,
+            command_count: 51,
+            unit_tests: 750,
+            integration_tests: 68,
+        };
+        let formatted = format_gap_stats(&stats);
+        assert!(formatted.contains("17"));
+        assert!(formatted.contains("750"));
+        assert!(formatted.contains("68"));
+        assert!(formatted.contains("818"));
+        assert!(formatted.contains("51"));
+    }
+
+    // ── /errors compact tests ──────────────────────────────────────────
+
+    #[test]
+    fn test_compact_error_log_empty() {
+        let result = compact_error_log(&[]);
+        assert!(result.contains("No error log entries"));
+    }
+
+    #[test]
+    fn test_compact_error_log_aggregates() {
+        let entries = vec![
+            ErrorLogEntry {
+                ts: "2026-03-19T10:00:00Z".to_string(),
+                day: 19,
+                categories: vec![("compile_error".to_string(), 3)],
+                source: "cargo build".to_string(),
+                resolved: Some(true),
+                fixed_categories: vec!["compile_error".to_string()],
+            },
+            ErrorLogEntry {
+                ts: "2026-03-19T11:00:00Z".to_string(),
+                day: 19,
+                categories: vec![
+                    ("compile_error".to_string(), 1),
+                    ("borrow_checker".to_string(), 2),
+                ],
+                source: "cargo build".to_string(),
+                resolved: None,
+                fixed_categories: vec![],
+            },
+        ];
+        let result = compact_error_log(&entries);
+        assert!(result.contains("compile_error"));
+        assert!(result.contains("borrow_checker"));
+        assert!(result.contains("Summary"));
+    }
+
+    #[test]
+    fn test_truncate_category() {
+        assert_eq!(truncate_category("short", 22), "short                 ");
+        assert_eq!(
+            truncate_category("a_very_long_category_name_here", 22),
+            "a_very_long_category_…"
+        );
+    }
+
+    #[test]
+    fn test_parse_runtime_errors_basic() {
+        use crate::commands_project::parse_runtime_errors;
+        let content = r#"{"ts":"2026-03-19T12:00:00Z","category":"tool_failure","tool":"bash","message":"command failed"}
+{"ts":"2026-03-19T12:01:00Z","category":"api_error","message":"429 Too Many Requests"}"#;
+        let entries = parse_runtime_errors(content);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].category, "tool_failure");
+        assert_eq!(entries[0].tool, Some("bash".to_string()));
+        assert_eq!(entries[1].category, "api_error");
+        assert_eq!(entries[1].tool, None);
+    }
+
+    #[test]
+    fn test_parse_runtime_errors_empty() {
+        use crate::commands_project::parse_runtime_errors;
+        let entries = parse_runtime_errors("");
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn test_format_runtime_errors_display_empty() {
+        use crate::commands_project::format_runtime_errors_display;
+        let display = format_runtime_errors_display(&[]);
+        assert!(display.contains("No runtime errors"));
+    }
+
+    #[test]
+    fn test_format_runtime_errors_display_with_data() {
+        use crate::commands_project::{format_runtime_errors_display, RuntimeError};
+        let entries = vec![
+            RuntimeError {
+                ts: "2026-03-19T12:00:00Z".to_string(),
+                category: "tool_failure".to_string(),
+                tool: Some("list_files".to_string()),
+                message: "Directory not found: .".to_string(),
+            },
+            RuntimeError {
+                ts: "2026-03-19T12:01:00Z".to_string(),
+                category: "api_error".to_string(),
+                tool: None,
+                message: "429 Too Many Requests".to_string(),
+            },
+        ];
+        let display = format_runtime_errors_display(&entries);
+        assert!(display.contains("2 total"));
+        assert!(display.contains("tool_failure"));
+        assert!(display.contains("api_error"));
+        assert!(display.contains("list_files"));
+    }
+
+    #[test]
+    fn test_detect_runtime_error_patterns_basic() {
+        use crate::commands_project::{detect_runtime_error_patterns, RuntimeError};
+        let entries = vec![
+            RuntimeError {
+                ts: "2026-03-19T10:00:00Z".into(),
+                category: "api_error".into(),
+                tool: None,
+                message: "connection refused".into(),
+            },
+            RuntimeError {
+                ts: "2026-03-19T10:01:00Z".into(),
+                category: "api_error".into(),
+                tool: None,
+                message: "connection refused".into(),
+            },
+            RuntimeError {
+                ts: "2026-03-19T10:02:00Z".into(),
+                category: "api_error".into(),
+                tool: None,
+                message: "connection refused".into(),
+            },
+            RuntimeError {
+                ts: "2026-03-19T10:03:00Z".into(),
+                category: "tool_failure".into(),
+                tool: Some("bash".into()),
+                message: "command failed".into(),
+            },
+        ];
+        let patterns = detect_runtime_error_patterns(&entries, 3);
+        assert_eq!(patterns.len(), 1);
+        assert_eq!(patterns[0].category, "api_error");
+        assert_eq!(patterns[0].message, "connection refused");
+        assert_eq!(patterns[0].count, 3);
+        assert_eq!(patterns[0].first_seen, "2026-03-19T10:00:00Z");
+        assert_eq!(patterns[0].last_seen, "2026-03-19T10:02:00Z");
+    }
+
+    #[test]
+    fn test_detect_runtime_error_patterns_empty() {
+        use crate::commands_project::detect_runtime_error_patterns;
+        let patterns = detect_runtime_error_patterns(&[], 3);
+        assert!(patterns.is_empty());
+    }
+
+    #[test]
+    fn test_detect_runtime_error_patterns_below_threshold() {
+        use crate::commands_project::{detect_runtime_error_patterns, RuntimeError};
+        let entries = vec![
+            RuntimeError {
+                ts: "2026-03-19T10:00:00Z".into(),
+                category: "api_error".into(),
+                tool: None,
+                message: "error A".into(),
+            },
+            RuntimeError {
+                ts: "2026-03-19T10:01:00Z".into(),
+                category: "api_error".into(),
+                tool: None,
+                message: "error B".into(),
+            },
+        ];
+        let patterns = detect_runtime_error_patterns(&entries, 3);
+        assert!(patterns.is_empty());
+    }
+
+    #[test]
+    fn test_detect_runtime_error_patterns_sorted_by_count() {
+        use crate::commands_project::{detect_runtime_error_patterns, RuntimeError};
+        let mut entries = Vec::new();
+        for _ in 0..5 {
+            entries.push(RuntimeError {
+                ts: "2026-03-19T10:00:00Z".into(),
+                category: "api_error".into(),
+                tool: None,
+                message: "five times".into(),
+            });
+        }
+        for _ in 0..3 {
+            entries.push(RuntimeError {
+                ts: "2026-03-19T10:00:00Z".into(),
+                category: "tool_failure".into(),
+                tool: Some("bash".into()),
+                message: "three times".into(),
+            });
+        }
+        let patterns = detect_runtime_error_patterns(&entries, 3);
+        assert_eq!(patterns.len(), 2);
+        assert_eq!(patterns[0].count, 5);
+        assert_eq!(patterns[1].count, 3);
+    }
+
+    #[test]
+    fn test_format_runtime_error_patterns_empty() {
+        use crate::commands_project::format_runtime_error_patterns;
+        let display = format_runtime_error_patterns(&[]);
+        assert!(display.contains("No recurring patterns"));
+    }
+
+    #[test]
+    fn test_format_runtime_error_patterns_with_data() {
+        use crate::commands_project::{format_runtime_error_patterns, RuntimeErrorPattern};
+        let patterns = vec![RuntimeErrorPattern {
+            category: "api_error".into(),
+            message: "connection refused".into(),
+            count: 10,
+            first_seen: "2026-03-19T10:00:00Z".into(),
+            last_seen: "2026-03-19T10:30:00Z".into(),
+        }];
+        let display = format_runtime_error_patterns(&patterns);
+        assert!(display.contains("10 × api_error"));
+        assert!(display.contains("connection refused"));
+        assert!(display.contains("2026-03-19"));
     }
 }

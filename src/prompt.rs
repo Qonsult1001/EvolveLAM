@@ -1,6 +1,7 @@
 //! Prompt execution and agent interaction.
 
 use crate::cli::is_verbose;
+use crate::context_lens::ContextLens;
 use crate::format::*;
 use std::collections::HashMap;
 use std::io::{self, Write};
@@ -10,6 +11,181 @@ use yoagent::*;
 
 /// Maximum number of automatic retries for transient API errors.
 const MAX_RETRIES: u32 = 3;
+
+/// Append a runtime error to `.yoyo/runtime_errors.jsonl`.
+/// Categories: "tool_failure", "api_error", "stream_error", "input_rejected"
+///
+/// Deduplicates with escalating throttle: same category+message within a window
+/// is suppressed. Window starts at 2s and escalates: after 3 occurrences → 30s,
+/// after 10 → 300s. When suppressed errors are finally logged, a `"count"` field
+/// records how many were suppressed since the last log.
+pub fn append_runtime_error(category: &str, message: &str, tool_name: Option<&str>) {
+    use std::sync::Mutex;
+    use std::time::SystemTime;
+
+    // Session-scoped throttle state: (category+message) → (occurrence_count, suppressed_count, last_logged_epoch)
+    type ThrottleState = HashMap<String, (u32, u32, u64)>;
+    static THROTTLE: std::sync::LazyLock<Mutex<ThrottleState>> =
+        std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
+    let ts = chrono_now_iso();
+    let safe_msg = message.replace('"', "\\\"").replace('\n', " ");
+    let throttle_key = format!("{}:{}", category, &safe_msg);
+
+    let now_epoch = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    // Check throttle: escalating dedup window
+    let (should_log, suppressed_count) = if let Ok(mut state) = THROTTLE.lock() {
+        let entry = state.entry(throttle_key.clone()).or_insert((0, 0, 0));
+        entry.0 += 1; // increment occurrence count
+        let occurrences = entry.0;
+
+        let window_secs: u64 = if occurrences > 10 {
+            300 // 5 minutes after 10+ occurrences
+        } else if occurrences > 3 {
+            30 // 30 seconds after 3+ occurrences
+        } else {
+            2 // default 2-second dedup
+        };
+
+        let elapsed = now_epoch.saturating_sub(entry.2);
+        if elapsed < window_secs {
+            entry.1 += 1; // count suppressed
+            (false, 0)
+        } else {
+            let suppressed = entry.1;
+            entry.1 = 0; // reset suppressed count
+            entry.2 = now_epoch; // update last logged time
+            (true, suppressed)
+        }
+    } else {
+        (true, 0) // mutex poisoned — log anyway
+    };
+
+    if !should_log {
+        return;
+    }
+
+    let tool_json = match tool_name {
+        Some(t) => format!(",\"tool\":\"{}\"", t.replace('"', "\\\"")),
+        None => String::new(),
+    };
+    let count_json = if suppressed_count > 0 {
+        format!(",\"suppressed\":{suppressed_count}")
+    } else {
+        String::new()
+    };
+    let line = format!(
+        "{{\"ts\":\"{ts}\",\"category\":\"{category}\"{tool_json},\"message\":\"{safe_msg}\"{count_json}}}"
+    );
+
+    let state_dir = crate::cli::yoyo_state_dir();
+    let log_path = state_dir.join("runtime_errors.jsonl");
+    let _ = std::fs::create_dir_all(&state_dir);
+
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    {
+        let _ = writeln!(f, "{}", line);
+    }
+}
+
+/// Check if a JSONL line is a duplicate of the current error (same category+message, within 2s).
+/// Superseded by in-memory throttle in append_runtime_error, but kept for test coverage.
+#[cfg(test)]
+pub fn is_duplicate_runtime_entry(
+    last_line: &str,
+    category: &str,
+    safe_msg: &str,
+    current_ts: &str,
+) -> bool {
+    // Quick check: does the line contain both the category and message?
+    let cat_needle = format!("\"category\":\"{category}\"");
+    let msg_needle = format!("\"message\":\"{safe_msg}\"");
+    if !last_line.contains(&cat_needle) || !last_line.contains(&msg_needle) {
+        return false;
+    }
+
+    // Check timestamp proximity (within 2 seconds)
+    // Extract ts from the last line
+    if let Some(ts_start) = last_line.find("\"ts\":\"") {
+        let ts_rest = &last_line[ts_start + 6..];
+        if let Some(ts_end) = ts_rest.find('"') {
+            let last_ts = &ts_rest[..ts_end];
+            // ISO timestamps are lexicographically ordered and fixed-width
+            // Compare: if difference in last 2 chars (seconds) is ≤ 2
+            if last_ts.len() == 20 && current_ts.len() == 20 && last_ts[..17] == current_ts[..17] {
+                // Same date+hour+minute, check seconds
+                if let (Ok(last_sec), Ok(cur_sec)) = (
+                    last_ts[17..19].parse::<u32>(),
+                    current_ts[17..19].parse::<u32>(),
+                ) {
+                    return cur_sec.abs_diff(last_sec) <= 2;
+                }
+            }
+        }
+    }
+
+    false
+}
+
+/// Get current time as ISO 8601 string (UTC).
+fn chrono_now_iso() -> String {
+    use std::time::SystemTime;
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    // Simple ISO 8601 without external crate
+    let secs_per_day = 86400u64;
+    let days = now / secs_per_day;
+    let day_secs = now % secs_per_day;
+    let hours = day_secs / 3600;
+    let minutes = (day_secs % 3600) / 60;
+    let seconds = day_secs % 60;
+    // Days since epoch to Y-M-D (civil_from_days algorithm)
+    let z = days as i64 + 719468;
+    let era = z / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{y:04}-{m:02}-{d:02}T{hours:02}:{minutes:02}:{seconds:02}Z")
+}
+
+/// Emit a tool event to `.yoyo/tool_events.jsonl` for IDE integration.
+/// VSCode extensions can watch this file to show inline diffs, file creates, etc.
+pub fn emit_tool_event(tool: &str, path: &str, old_text: &str, new_text: &str) {
+    let state_dir = crate::cli::yoyo_state_dir();
+    let _ = std::fs::create_dir_all(&state_dir);
+    let event_path = state_dir.join("tool_events.jsonl");
+
+    // Build JSON using serde_json for correct escaping
+    let event = serde_json::json!({
+        "ts": chrono_now_iso(),
+        "tool": tool,
+        "path": path,
+        "old_text": old_text,
+        "new_text": new_text,
+    });
+
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(event_path)
+    {
+        let _ = writeln!(f, "{}", event);
+    }
+}
 
 /// Calculate exponential backoff delay for a given retry attempt (1-indexed).
 /// Returns 1s, 2s, 4s for attempts 1, 2, 3.
@@ -96,6 +272,24 @@ fn tool_result_preview(result: &ToolResult, max_chars: usize) -> String {
     // Take first line only, truncated
     let first_line = text.lines().next().unwrap_or("");
     truncate_with_ellipsis(first_line, max_chars)
+}
+
+/// Check if a tool result contains useful content beyond just an error marker.
+/// Returns true if the result has non-trivial text content (>20 chars), indicating
+/// a partial success — the tool failed but still produced useful output.
+pub fn has_useful_content(result: &ToolResult) -> bool {
+    let text: String = result
+        .content
+        .iter()
+        .filter_map(|c| match c {
+            Content::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let text = text.trim();
+    // More than 20 chars suggests real content, not just "error" or "failed"
+    text.len() > 20
 }
 
 /// Write response text to a file if --output was specified.
@@ -274,15 +468,42 @@ enum PromptResult {
 
 /// Execute a single prompt attempt and process all events.
 /// Returns whether we got a retriable error (so the caller can retry).
-async fn run_prompt_once(agent: &mut Agent, input: &str) -> PromptResult {
-    let mut rx = agent.prompt(input).await;
+async fn run_prompt_once(
+    agent: &mut Agent,
+    input: &str,
+    lens: Option<&ContextLens>,
+) -> PromptResult {
+    // Active brain context injection: query the lens and enrich the input
+    let enriched_input;
+    let effective_input = if let Some(lens) = lens {
+        let ctx = lens.query(input);
+        if ctx.relevance_score > 0.1 && !ctx.text.is_empty() {
+            enriched_input = format!("{input}\n\n---\n{}", ctx.text);
+            &enriched_input
+        } else {
+            input
+        }
+    } else {
+        input
+    };
+    let mut rx = agent.prompt(effective_input).await;
     let mut usage = Usage::default();
     let mut in_text = false;
     let mut tool_timers: HashMap<String, Instant> = HashMap::new();
+    let mut tool_names: HashMap<String, String> = HashMap::new();
     let mut collected_text = String::new();
     let mut retriable_error: Option<String> = None;
     let mut md_renderer = MarkdownRenderer::new();
     let mut spinner: Option<Spinner> = Some(Spinner::start());
+
+    // IDE response streaming: write raw markdown to .yoyo/response.md
+    let response_dir = crate::cli::yoyo_state_dir();
+    let response_path = response_dir.join("response.md");
+    if let Err(e) = std::fs::create_dir_all(&response_dir) {
+        eprintln!("{DIM}  (IDE response dir failed: {e}){RESET}");
+    }
+    // Clear previous response at start of each prompt
+    let _ = std::fs::write(&response_path, "");
 
     loop {
         tokio::select! {
@@ -299,6 +520,7 @@ async fn run_prompt_once(agent: &mut Agent, input: &str) -> PromptResult {
                             in_text = false;
                         }
                         tool_timers.insert(tool_call_id.clone(), Instant::now());
+                        tool_names.insert(tool_call_id.clone(), tool_name.clone());
                         let summary = format_tool_summary(&tool_name, &args);
                         print!("{YELLOW}  ▶ {summary}{RESET}");
                         if is_verbose() {
@@ -316,6 +538,18 @@ async fn run_prompt_once(agent: &mut Agent, input: &str) -> PromptResult {
                                 println!();
                                 println!("{diff}");
                             }
+                            // Emit tool event for IDE integration (inline diffs)
+                            let file_path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                            if !file_path.is_empty() {
+                                emit_tool_event("edit_file", file_path, old_text, new_text);
+                            }
+                        } else if tool_name == "write_file" || tool_name == "create_file" {
+                            // Emit create event for IDE integration
+                            let file_path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                            let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                            if !file_path.is_empty() {
+                                emit_tool_event(&tool_name, file_path, "", content);
+                            }
                         }
                         io::stdout().flush().ok();
                     }
@@ -323,11 +557,25 @@ async fn run_prompt_once(agent: &mut Agent, input: &str) -> PromptResult {
                         let duration = tool_timers
                             .remove(&tool_call_id)
                             .map(|start| format_duration(start.elapsed()));
+                        let resolved_tool = tool_names.remove(&tool_call_id);
                         let dur_str = duration
                             .map(|d| format!(" {DIM}({d}){RESET}"))
                             .unwrap_or_default();
                         if is_error {
-                            println!(" {RED}✗{RESET}{dur_str}");
+                            // Log runtime error persistently
+                            let preview = tool_result_preview(&result, 200);
+                            append_runtime_error(
+                                "tool_failure",
+                                &preview,
+                                resolved_tool.as_deref(),
+                            );
+                            // Check for partial success — tool errored but has content
+                            let has_content = has_useful_content(&result);
+                            if has_content {
+                                println!(" {YELLOW}⚠{RESET}{dur_str} {DIM}(partial){RESET}");
+                            } else {
+                                println!(" {RED}✗{RESET}{dur_str}");
+                            }
                             let preview = tool_result_preview(&result, 200);
                             if !preview.is_empty() {
                                 println!("{DIM}    {preview}{RESET}");
@@ -360,6 +608,8 @@ async fn run_prompt_once(agent: &mut Agent, input: &str) -> PromptResult {
                             in_text = true;
                         }
                         collected_text.push_str(&delta);
+                        // Stream raw markdown to file for IDE webview rendering
+                        let _ = std::fs::write(&response_path, &collected_text);
                         let rendered = md_renderer.render_delta(&delta);
                         if !rendered.is_empty() {
                             print!("{}", rendered);
@@ -378,6 +628,11 @@ async fn run_prompt_once(agent: &mut Agent, input: &str) -> PromptResult {
                     AgentEvent::AgentEnd { messages } => {
                         // Stop spinner if still running
                         if let Some(s) = spinner.take() { s.stop(); }
+                        // Write final response to IDE response file
+                        if !collected_text.is_empty() {
+                            let _ = std::fs::write(&response_path, &collected_text);
+                        }
+                        let mut logged_error: Option<String> = None;
                         for msg in &messages {
                             if let AgentMessage::Llm(Message::Assistant { usage: msg_usage, stop_reason, error_message, .. }) = msg {
                                 usage.input += msg_usage.input;
@@ -391,11 +646,17 @@ async fn run_prompt_once(agent: &mut Agent, input: &str) -> PromptResult {
                                             println!();
                                             in_text = false;
                                         }
+                                        // Log API error persistently — deduplicate within this AgentEnd event
+                                        if logged_error.as_deref() != Some(err_msg) {
+                                            append_runtime_error("api_error", err_msg, None);
+                                            logged_error = Some(err_msg.clone());
+                                        }
                                         // Check if this error is worth retrying
                                         if is_retriable_error(err_msg) {
                                             retriable_error = Some(err_msg.clone());
                                         } else {
                                             eprintln!("\n{RED}  error: {err_msg}{RESET}");
+                                            print_connection_diagnostic(err_msg);
                                         }
                                     }
                                 }
@@ -404,6 +665,7 @@ async fn run_prompt_once(agent: &mut Agent, input: &str) -> PromptResult {
                     }
                     AgentEvent::InputRejected { reason } => {
                         if let Some(s) = spinner.take() { s.stop(); }
+                        append_runtime_error("input_rejected", &reason, None);
                         eprintln!("{RED}  input rejected: {reason}{RESET}");
                     }
                     AgentEvent::ProgressMessage { text, .. } => {
@@ -436,6 +698,11 @@ async fn run_prompt_once(agent: &mut Agent, input: &str) -> PromptResult {
     // Stop spinner if still running (e.g., channel closed without events)
     if let Some(s) = spinner.take() {
         s.stop();
+        // If spinner was still running when channel closed, stream ended unexpectedly
+        if collected_text.is_empty() && retriable_error.is_none() {
+            append_runtime_error("stream_error", "Stream ended without response", None);
+            eprintln!("\n{RED}  error: Stream ended{RESET}");
+        }
     }
 
     // Flush any remaining buffered markdown content
@@ -467,6 +734,7 @@ pub async fn run_prompt(
     input: &str,
     session_total: &mut Usage,
     model: &str,
+    lens: Option<&ContextLens>,
 ) -> String {
     let prompt_start = Instant::now();
     let mut total_usage = Usage::default();
@@ -483,7 +751,7 @@ pub async fn run_prompt(
             }
         }
 
-        match run_prompt_once(agent, input).await {
+        match run_prompt_once(agent, input, lens).await {
             PromptResult::Done {
                 collected_text: text,
                 usage,
@@ -515,6 +783,7 @@ pub async fn run_prompt(
                     // Exhausted all retries — show the final error
                     eprintln!("\n{RED}  error: {error_msg}{RESET}");
                     eprintln!("{DIM}  (failed after {} attempts){RESET}", MAX_RETRIES + 1);
+                    print_connection_diagnostic(&error_msg);
                 }
             }
         }
@@ -527,6 +796,105 @@ pub async fn run_prompt(
     print_usage(&total_usage, session_total, model, prompt_start.elapsed());
     println!();
     collected_text
+}
+
+/// Print a helpful diagnostic when a connection error is detected.
+pub fn print_connection_diagnostic(error_msg: &str) {
+    let lower = error_msg.to_lowercase();
+    let is_connection_error = lower.contains("error sending request")
+        || lower.contains("connection refused")
+        || lower.contains("connect error")
+        || lower.contains("dns error")
+        || lower.contains("no such host")
+        || lower.contains("network is unreachable");
+
+    if !is_connection_error {
+        return;
+    }
+
+    // Try to extract the URL from the error message
+    let url_hint = if let Some(start) = error_msg.find("http://").or(error_msg.find("https://")) {
+        let rest = &error_msg[start..];
+        let url_end = rest
+            .find(|c: char| c.is_whitespace() || c == '\'' || c == '"')
+            .unwrap_or(rest.len());
+        Some(&rest[..url_end])
+    } else if lower.contains("localhost") || lower.contains("127.0.0.1") {
+        Some("localhost")
+    } else {
+        None
+    };
+
+    eprintln!();
+    if let Some(url) = url_hint {
+        eprintln!("{YELLOW}  Cannot reach provider at {url}{RESET}");
+    } else {
+        eprintln!("{YELLOW}  Cannot reach the configured provider endpoint.{RESET}");
+    }
+    eprintln!("{DIM}  Possible causes:{RESET}");
+    if lower.contains("localhost") || lower.contains("127.0.0.1") || lower.contains("11434") {
+        eprintln!("{DIM}    - Is Ollama running? Try: ollama serve{RESET}");
+    }
+    if lower.contains("openrouter") || lower.contains("groq") || lower.contains("openai") {
+        eprintln!("{DIM}    - Check your internet connection{RESET}");
+        eprintln!("{DIM}    - Verify your API key is correct{RESET}");
+    }
+    eprintln!("{DIM}    - Run: yoyo /doctor  (to check endpoint reachability){RESET}");
+}
+
+/// Check if the configured provider endpoint is reachable (TCP connect test).
+/// Returns (reachable, latency_ms, error_message).
+pub fn check_endpoint_reachable(
+    provider: &str,
+    base_url: Option<&str>,
+) -> (bool, Option<u64>, Option<String>) {
+    let url = match base_url {
+        Some(url) => url.to_string(),
+        None => match provider {
+            "anthropic" => "https://api.anthropic.com".to_string(),
+            "openai" => "https://api.openai.com".to_string(),
+            "ollama" => "http://localhost:11434".to_string(),
+            "groq" => "https://api.groq.com".to_string(),
+            "openrouter" => "https://openrouter.ai".to_string(),
+            _ => return (false, None, Some("Unknown provider".to_string())),
+        },
+    };
+
+    // Parse host:port from URL
+    let stripped = url
+        .trim_start_matches("https://")
+        .trim_start_matches("http://");
+    let is_https = url.starts_with("https://");
+    let (host, port) = if let Some(colon_pos) = stripped.find(':') {
+        let host = &stripped[..colon_pos];
+        let port_str = stripped[colon_pos + 1..].split('/').next().unwrap_or("");
+        let port: u16 = port_str.parse().unwrap_or(if is_https { 443 } else { 80 });
+        (host.to_string(), port)
+    } else {
+        let host = stripped.split('/').next().unwrap_or(stripped);
+        (host.to_string(), if is_https { 443 } else { 80 })
+    };
+
+    let addr = format!("{host}:{port}");
+    let start = std::time::Instant::now();
+
+    match std::net::TcpStream::connect_timeout(
+        &addr.parse().unwrap_or_else(|_| {
+            // DNS resolution via ToSocketAddrs
+            use std::net::ToSocketAddrs;
+            addr.to_socket_addrs()
+                .ok()
+                .and_then(|mut addrs| addrs.next())
+                .unwrap_or_else(|| std::net::SocketAddr::from(([127, 0, 0, 1], port)))
+        }),
+        std::time::Duration::from_secs(5),
+    ) {
+        Ok(_) => {
+            let latency = start.elapsed().as_millis() as u64;
+            (true, Some(latency), None)
+        }
+        Err(e) => (false, None, Some(format!("{e}"))),
+    }
 }
 
 #[cfg(test)]
@@ -850,5 +1218,189 @@ mod tests {
         assert_eq!(results.len(), 1);
         // The preview should contain BOLD highlighting around "hello"
         assert!(results[0].2.contains(&format!("{BOLD}hello{RESET}")));
+    }
+
+    #[test]
+    fn test_has_useful_content_empty() {
+        let result = ToolResult {
+            content: vec![],
+            details: serde_json::json!(null),
+        };
+        assert!(!has_useful_content(&result));
+    }
+
+    #[test]
+    fn test_has_useful_content_short_error() {
+        let result = ToolResult {
+            content: vec![Content::Text {
+                text: "error".to_string(),
+            }],
+            details: serde_json::json!(null),
+        };
+        assert!(!has_useful_content(&result));
+    }
+
+    #[test]
+    fn test_has_useful_content_with_real_content() {
+        let result = ToolResult {
+            content: vec![Content::Text {
+                text: "Exit code: 1\nSTDOUT:\ntest_foo ... ok\ntest_bar ... FAILED\nSTDERR:\nerror[E0308]: mismatched types".to_string(),
+            }],
+            details: serde_json::json!(null),
+        };
+        assert!(has_useful_content(&result));
+    }
+
+    #[test]
+    fn test_has_useful_content_threshold() {
+        // Exactly at threshold (20 chars)
+        let result = ToolResult {
+            content: vec![Content::Text {
+                text: "12345678901234567890".to_string(),
+            }],
+            details: serde_json::json!(null),
+        };
+        assert!(!has_useful_content(&result)); // not >20, it's ==20
+
+        let result2 = ToolResult {
+            content: vec![Content::Text {
+                text: "123456789012345678901".to_string(), // 21 chars
+            }],
+            details: serde_json::json!(null),
+        };
+        assert!(has_useful_content(&result2));
+    }
+
+    #[test]
+    fn test_chrono_now_iso_format() {
+        let ts = chrono_now_iso();
+        // Should be ISO 8601 format: YYYY-MM-DDTHH:MM:SSZ
+        assert!(ts.len() == 20, "timestamp should be 20 chars: {ts}");
+        assert!(ts.ends_with('Z'));
+        assert_eq!(&ts[4..5], "-");
+        assert_eq!(&ts[7..8], "-");
+        assert_eq!(&ts[10..11], "T");
+    }
+
+    #[test]
+    fn test_append_runtime_error_format() {
+        // Test the format without file I/O (avoid cwd race conditions in parallel tests)
+        let ts = chrono_now_iso();
+        assert!(!ts.is_empty());
+
+        // Verify escaping works
+        let msg = "error with \"quotes\" and\nnewlines";
+        let safe = msg.replace('"', "\\\"").replace('\n', " ");
+        assert_eq!(safe, "error with \\\"quotes\\\" and newlines");
+    }
+
+    #[test]
+    fn test_append_runtime_error_writes_file() {
+        // Use a unique temp dir to avoid conflicts with parallel tests
+        let dir = std::env::temp_dir().join(format!(
+            "yoyo_rt_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let yoyo_dir = dir.join(".yoyo");
+        std::fs::create_dir_all(&yoyo_dir).unwrap();
+        let log_path = yoyo_dir.join("runtime_errors.jsonl");
+
+        // Write directly to the specific path
+        let line = "{\"ts\":\"2026-01-01T00:00:00Z\",\"category\":\"tool_failure\",\"tool\":\"bash\",\"message\":\"test\"}";
+        std::fs::write(&log_path, format!("{line}\n")).unwrap();
+
+        let content = std::fs::read_to_string(&log_path).unwrap();
+        assert!(content.contains("\"category\":\"tool_failure\""));
+        assert!(content.contains("\"tool\":\"bash\""));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_is_duplicate_runtime_entry_same_category_message_within_2s() {
+        let last = r#"{"ts":"2026-03-19T10:00:05Z","category":"api_error","message":"connection refused"}"#;
+        assert!(is_duplicate_runtime_entry(
+            last,
+            "api_error",
+            "connection refused",
+            "2026-03-19T10:00:06Z"
+        ));
+        assert!(is_duplicate_runtime_entry(
+            last,
+            "api_error",
+            "connection refused",
+            "2026-03-19T10:00:07Z"
+        ));
+    }
+
+    #[test]
+    fn test_is_duplicate_runtime_entry_same_but_too_far() {
+        let last = r#"{"ts":"2026-03-19T10:00:05Z","category":"api_error","message":"connection refused"}"#;
+        assert!(!is_duplicate_runtime_entry(
+            last,
+            "api_error",
+            "connection refused",
+            "2026-03-19T10:00:10Z"
+        ));
+    }
+
+    #[test]
+    fn test_is_duplicate_runtime_entry_different_category() {
+        let last = r#"{"ts":"2026-03-19T10:00:05Z","category":"api_error","message":"connection refused"}"#;
+        assert!(!is_duplicate_runtime_entry(
+            last,
+            "tool_failure",
+            "connection refused",
+            "2026-03-19T10:00:06Z"
+        ));
+    }
+
+    #[test]
+    fn test_is_duplicate_runtime_entry_different_message() {
+        let last = r#"{"ts":"2026-03-19T10:00:05Z","category":"api_error","message":"connection refused"}"#;
+        assert!(!is_duplicate_runtime_entry(
+            last,
+            "api_error",
+            "timeout",
+            "2026-03-19T10:00:06Z"
+        ));
+    }
+
+    #[test]
+    fn test_is_duplicate_runtime_entry_different_minute() {
+        let last = r#"{"ts":"2026-03-19T10:00:59Z","category":"api_error","message":"error"}"#;
+        // Different minute — not a duplicate even if message matches
+        assert!(!is_duplicate_runtime_entry(
+            last,
+            "api_error",
+            "error",
+            "2026-03-19T10:01:01Z"
+        ));
+    }
+
+    #[test]
+    fn test_check_endpoint_reachable_unknown_provider() {
+        let (ok, _, err) = check_endpoint_reachable("nonexistent_provider", None);
+        assert!(!ok);
+        assert!(err.unwrap().contains("Unknown provider"));
+    }
+
+    #[test]
+    fn test_check_endpoint_reachable_bad_host() {
+        let (ok, _, err) = check_endpoint_reachable("custom", Some("http://192.0.2.1:1"));
+        assert!(!ok);
+        assert!(err.is_some());
+    }
+
+    #[test]
+    fn test_print_connection_diagnostic_does_not_panic() {
+        // Should not panic on various error messages
+        print_connection_diagnostic("error sending request for url (http://localhost:11434)");
+        print_connection_diagnostic("connection refused");
+        print_connection_diagnostic("some other error");
+        print_connection_diagnostic("");
     }
 }

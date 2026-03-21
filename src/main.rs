@@ -28,22 +28,33 @@
 //!   /search <query> Search conversation history
 //!   /spawn <task>   Spawn a subagent with fresh context
 //!   /tree [depth]   Show project directory tree
+//!   /ast <pattern>  Search code symbols (fn, struct, trait, class)
 //!   /test           Auto-detect and run project tests
 //!   /lint           Auto-detect and run project linter
 //!   /pr [number]    List open PRs, view/diff/comment/checkout a PR, or create one
 //!   /retry          Re-send the last user input
 
+mod ast;
 mod cli;
 mod commands;
+mod commands_core;
 mod commands_git;
+mod commands_memory;
 mod commands_project;
 mod commands_session;
+mod context_lens;
 mod docs;
 mod format;
 mod git;
+mod ide_bridge;
 mod memory;
 mod prompt;
 mod repl;
+#[allow(dead_code)]
+mod router;
+#[allow(dead_code)]
+mod said;
+mod serve;
 
 use cli::*;
 use format::*;
@@ -52,13 +63,13 @@ use prompt::*;
 use std::io::{self, IsTerminal, Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use yoagent::agent::Agent;
 use yoagent::context::ExecutionLimits;
 use yoagent::openapi::{OpenApiConfig, OperationFilter};
 use yoagent::provider::{
     AnthropicProvider, GoogleProvider, ModelConfig, OpenAiCompat, OpenAiCompatProvider,
 };
-use yoagent::tools::bash::BashTool;
 use yoagent::tools::edit::EditFileTool;
 use yoagent::tools::file::{ReadFileTool, WriteFileTool};
 use yoagent::tools::list::ListFilesTool;
@@ -102,6 +113,97 @@ impl AgentTool for GuardedTool {
         if let Some(path) = params.get("path").and_then(|v| v.as_str()) {
             if let Err(reason) = self.restrictions.check_path(path) {
                 return Err(yoagent::types::ToolError::Failed(reason));
+            }
+        }
+        self.inner.execute(params, ctx).await
+    }
+}
+
+/// Binary file extensions that should not be read (wastes tokens, produces no useful output).
+const BINARY_EXTENSIONS: &[&str] = &[
+    "so", "dll", "exe", "o", "a", "dylib", "pyc", "pyo", "class", "jar", "wasm", "bin", "obj",
+    "lib", "pdb", "dSYM", "whl", "egg", "png", "jpg", "jpeg", "gif", "bmp", "ico", "webp", "mp3",
+    "mp4", "wav", "avi", "mov", "mkv", "zip", "gz", "tar", "bz2", "xz", "7z", "rar", "pdf", "ttf",
+    "otf", "woff", "woff2", "eot",
+];
+
+/// Check if a file path has a binary extension.
+pub fn is_binary_extension(path: &str) -> bool {
+    let path_lower = path.to_lowercase();
+    if let Some(ext) = path_lower.rsplit('.').next() {
+        BINARY_EXTENSIONS.contains(&ext)
+    } else {
+        false
+    }
+}
+
+/// A wrapper around ReadFileTool that rejects binary file extensions before execution.
+struct BinaryGuardedReadTool {
+    inner: Box<dyn AgentTool>,
+}
+
+#[async_trait::async_trait]
+impl AgentTool for BinaryGuardedReadTool {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+    fn label(&self) -> &str {
+        self.inner.label()
+    }
+    fn description(&self) -> &str {
+        self.inner.description()
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        self.inner.parameters_schema()
+    }
+    async fn execute(
+        &self,
+        params: serde_json::Value,
+        ctx: yoagent::types::ToolContext,
+    ) -> Result<yoagent::types::ToolResult, yoagent::types::ToolError> {
+        if let Some(path) = params.get("path").and_then(|v| v.as_str()) {
+            if is_binary_extension(path) {
+                let ext = path.rsplit('.').next().unwrap_or("binary");
+                return Err(yoagent::types::ToolError::Failed(format!(
+                    "Skipped binary file ({ext}): {path}. Binary files waste tokens and produce no useful output. Use bash to inspect binary files if needed."
+                )));
+            }
+        }
+        self.inner.execute(params, ctx).await
+    }
+}
+
+/// A wrapper around ListFilesTool that normalizes "." to the actual cwd.
+/// Some yoagent tool implementations fail to resolve "." as a directory.
+struct CwdNormalizedListTool {
+    inner: Box<dyn AgentTool>,
+}
+
+#[async_trait::async_trait]
+impl AgentTool for CwdNormalizedListTool {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+    fn label(&self) -> &str {
+        self.inner.label()
+    }
+    fn description(&self) -> &str {
+        self.inner.description()
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        self.inner.parameters_schema()
+    }
+    async fn execute(
+        &self,
+        mut params: serde_json::Value,
+        ctx: yoagent::types::ToolContext,
+    ) -> Result<yoagent::types::ToolResult, yoagent::types::ToolError> {
+        // Normalize "." or empty path to the actual working directory
+        if let Some(path) = params.get("path").and_then(|v| v.as_str()) {
+            if path == "." || path.is_empty() {
+                if let Ok(cwd) = std::env::current_dir() {
+                    params["path"] = serde_json::Value::String(cwd.to_string_lossy().to_string());
+                }
             }
         }
         self.inner.execute(params, ctx).await
@@ -277,6 +379,196 @@ fn maybe_confirm(
     })
 }
 
+/// Bash tool with real-time line-by-line output streaming.
+///
+/// Unlike yoagent's built-in BashTool which buffers the full output, this tool
+/// spawns the process and reads stdout/stderr incrementally, emitting each chunk
+/// via `ctx.on_update` so the UI can display output as it arrives.
+struct StreamingBashTool {
+    timeout: Duration,
+    max_output_bytes: usize,
+    deny_patterns: Vec<String>,
+    confirm_fn: Option<yoagent::tools::bash::ConfirmFn>,
+}
+
+impl Default for StreamingBashTool {
+    fn default() -> Self {
+        Self {
+            timeout: Duration::from_secs(120),
+            max_output_bytes: 256 * 1024,
+            deny_patterns: vec![
+                "rm -rf /".into(),
+                "rm -rf /*".into(),
+                "mkfs".into(),
+                "dd if=".into(),
+                ":(){:|:&};:".into(),
+            ],
+            confirm_fn: None,
+        }
+    }
+}
+
+impl StreamingBashTool {
+    fn with_confirm(mut self, f: impl Fn(&str) -> bool + Send + Sync + 'static) -> Self {
+        self.confirm_fn = Some(Box::new(f));
+        self
+    }
+}
+
+#[async_trait::async_trait]
+impl yoagent::types::AgentTool for StreamingBashTool {
+    fn name(&self) -> &str {
+        "bash"
+    }
+
+    fn label(&self) -> &str {
+        "Execute Command"
+    }
+
+    fn description(&self) -> &str {
+        "Execute a bash command and return stdout/stderr. Use for running scripts, installing packages, checking system state, etc."
+    }
+
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "The bash command to execute"
+                }
+            },
+            "required": ["command"]
+        })
+    }
+
+    async fn execute(
+        &self,
+        params: serde_json::Value,
+        ctx: yoagent::types::ToolContext,
+    ) -> Result<yoagent::types::ToolResult, yoagent::types::ToolError> {
+        use tokio::io::AsyncBufReadExt;
+        use yoagent::types::*;
+
+        let cancel = ctx.cancel.clone();
+        let command = params["command"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidArgs("missing 'command' parameter".into()))?;
+
+        // Check deny patterns
+        for pattern in &self.deny_patterns {
+            if command.contains(pattern.as_str()) {
+                return Err(ToolError::Failed(format!(
+                    "Command blocked by safety policy: contains '{}'.",
+                    pattern
+                )));
+            }
+        }
+
+        // Check confirmation callback
+        if let Some(ref confirm) = self.confirm_fn {
+            if !confirm(command) {
+                return Err(ToolError::Failed(
+                    "Command was not confirmed by the user.".into(),
+                ));
+            }
+        }
+
+        let mut cmd = tokio::process::Command::new("bash");
+        cmd.arg("-c").arg(command);
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| ToolError::Failed(format!("Failed to execute: {}", e)))?;
+
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
+
+        let max_bytes = self.max_output_bytes;
+        let on_update = ctx.on_update.clone();
+
+        // Read stdout and stderr concurrently, streaming lines as they arrive
+        let stdout_handle = tokio::spawn(async move {
+            let mut lines = Vec::new();
+            let mut total_bytes = 0usize;
+            if let Some(stdout) = stdout {
+                let reader = tokio::io::BufReader::new(stdout);
+                let mut line_reader = reader.lines();
+                while let Ok(Some(line)) = line_reader.next_line().await {
+                    total_bytes += line.len() + 1;
+                    if total_bytes > max_bytes {
+                        lines.push("... (output truncated)".to_string());
+                        break;
+                    }
+                    // Stream each line via on_update
+                    if let Some(ref update_fn) = on_update {
+                        update_fn(ToolResult {
+                            content: vec![Content::Text { text: line.clone() }],
+                            details: serde_json::Value::Null,
+                        });
+                    }
+                    lines.push(line);
+                }
+            }
+            lines
+        });
+
+        let stderr_handle = tokio::spawn(async move {
+            let mut lines = Vec::new();
+            if let Some(stderr) = stderr {
+                let reader = tokio::io::BufReader::new(stderr);
+                let mut line_reader = reader.lines();
+                while let Ok(Some(line)) = line_reader.next_line().await {
+                    lines.push(line);
+                }
+            }
+            lines
+        });
+
+        // Wait for process with timeout and cancellation
+        let timeout = self.timeout;
+        let status = tokio::select! {
+            _ = cancel.cancelled() => {
+                let _ = child.kill().await;
+                return Err(ToolError::Cancelled);
+            }
+            _ = tokio::time::sleep(timeout) => {
+                let _ = child.kill().await;
+                return Err(ToolError::Failed(format!(
+                    "Command timed out after {}s",
+                    timeout.as_secs()
+                )));
+            }
+            status = child.wait() => {
+                status.map_err(|e| ToolError::Failed(format!("Process error: {}", e)))?
+            }
+        };
+
+        let stdout_lines = stdout_handle.await.unwrap_or_default();
+        let stderr_lines = stderr_handle.await.unwrap_or_default();
+
+        let stdout_text = stdout_lines.join("\n");
+        let stderr_text = stderr_lines.join("\n");
+        let exit_code = status.code().unwrap_or(-1);
+
+        let output = if stderr_text.is_empty() {
+            format!("Exit code: {}\n{}", exit_code, stdout_text)
+        } else {
+            format!(
+                "Exit code: {}\nSTDOUT:\n{}\nSTDERR:\n{}",
+                exit_code, stdout_text, stderr_text
+            )
+        };
+
+        Ok(ToolResult {
+            content: vec![Content::Text { text: output }],
+            details: serde_json::json!({ "exit_code": exit_code, "success": exit_code == 0 }),
+        })
+    }
+}
+
 /// Build the tool set, optionally with a bash confirmation prompt.
 /// When `auto_approve` is false (default), bash commands and file writes require user approval.
 /// The "always" option sets a session-wide flag so subsequent operations are auto-approved.
@@ -292,11 +584,11 @@ pub fn build_tools(
     let always_approved = Arc::new(AtomicBool::new(false));
 
     let bash = if auto_approve {
-        BashTool::default()
+        StreamingBashTool::default()
     } else {
         let flag = Arc::clone(&always_approved);
         let perms = permissions.clone();
-        BashTool::default().with_confirm(move |cmd: &str| {
+        StreamingBashTool::default().with_confirm(move |cmd: &str| {
             // If user previously chose "always", skip the prompt
             if flag.load(Ordering::Relaxed) {
                 eprintln!(
@@ -369,10 +661,20 @@ pub fn build_tools(
 
     vec![
         Box::new(bash),
-        maybe_guard(Box::new(ReadFileTool::default()), dir_restrictions),
+        maybe_guard(
+            Box::new(BinaryGuardedReadTool {
+                inner: Box::new(ReadFileTool::default()),
+            }),
+            dir_restrictions,
+        ),
         write_tool,
         edit_tool,
-        maybe_guard(Box::new(ListFilesTool::default()), dir_restrictions),
+        maybe_guard(
+            Box::new(CwdNormalizedListTool {
+                inner: Box::new(ListFilesTool::default()),
+            }),
+            dir_restrictions,
+        ),
         maybe_guard(Box::new(SearchTool::default()), dir_restrictions),
     ]
 }
@@ -588,6 +890,9 @@ async fn main() {
         enable_verbose();
     }
 
+    // Set project path for .yoyo/ state directory
+    cli::set_project_path(config.project_path);
+
     let continue_session = config.continue_session;
     let output_path = config.output_path;
     let mcp_servers = config.mcp_servers;
@@ -596,11 +901,68 @@ async fn main() {
     let is_interactive = io::stdin().is_terminal() && config.prompt_arg.is_none();
     let auto_approve = config.auto_approve || !is_interactive;
 
+    // If --provider ide: detect IDE CLI and start local bridge
+    let mut provider = config.provider;
+    let mut base_url = config.base_url;
+    let mut api_key = config.api_key;
+
+    if provider == "ide" {
+        match ide_bridge::detect_ide() {
+            Some(ide_bridge::IdeDetection::DirectApi {
+                api_key: token,
+                proxy,
+            }) => {
+                // Found session credentials — start local bridge with Bearer auth
+                eprintln!(
+                    "{DIM}  IDE mode: using host session credentials (Bearer auth bridge){RESET}"
+                );
+                let creds = ide_bridge::SessionCreds {
+                    bearer_token: token,
+                    proxy_url: proxy,
+                };
+                match ide_bridge::start_api_bridge(creds).await {
+                    Ok(port) => {
+                        eprintln!("{DIM}  IDE bridge: listening on 127.0.0.1:{port}{RESET}");
+                        provider = "custom".to_string();
+                        base_url = Some(format!("http://127.0.0.1:{port}/v1"));
+                        api_key = "ide-bridge".to_string();
+                    }
+                    Err(e) => {
+                        eprintln!("{RED}error:{RESET} Failed to start IDE API bridge: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            Some(ide_bridge::IdeDetection::CliBackend(backend)) => {
+                // Fall back to CLI subprocess bridge
+                eprintln!("{DIM}  IDE bridge: detected {backend}, starting local proxy...{RESET}");
+                match ide_bridge::start_bridge(backend).await {
+                    Ok(port) => {
+                        eprintln!("{DIM}  IDE bridge: listening on 127.0.0.1:{port}{RESET}");
+                        provider = "custom".to_string();
+                        base_url = Some(format!("http://127.0.0.1:{port}/v1"));
+                        api_key = "ide-bridge".to_string();
+                    }
+                    Err(e) => {
+                        eprintln!("{RED}error:{RESET} Failed to start IDE bridge: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            None => {
+                eprintln!(
+                    "{RED}error:{RESET} No IDE detected. Install Claude Code (`claude`) or run inside a coding agent."
+                );
+                std::process::exit(1);
+            }
+        }
+    }
+
     let mut agent_config = AgentConfig {
         model: config.model,
-        api_key: config.api_key,
-        provider: config.provider,
-        base_url: config.base_url,
+        api_key,
+        provider,
+        base_url,
         skills: config.skills,
         system_prompt: config.system_prompt,
         thinking: config.thinking,
@@ -683,6 +1045,12 @@ async fn main() {
         }
     }
 
+    // --serve: start as OpenAI-compatible HTTP server for IDE integration
+    if config.serve {
+        serve::start_server(agent_config, config.port).await;
+        return;
+    }
+
     // --prompt / -p: single-shot mode with a prompt argument
     if let Some(prompt_text) = config.prompt_arg {
         if agent_config.provider != "anthropic" {
@@ -702,6 +1070,7 @@ async fn main() {
             prompt_text.trim(),
             &mut session_total,
             &agent_config.model,
+            None,
         )
         .await;
         write_output_file(&output_path, &response);
@@ -723,7 +1092,14 @@ async fn main() {
             agent_config.model
         );
         let mut session_total = Usage::default();
-        let response = run_prompt(&mut agent, input, &mut session_total, &agent_config.model).await;
+        let response = run_prompt(
+            &mut agent,
+            input,
+            &mut session_total,
+            &agent_config.model,
+            None,
+        )
+        .await;
         write_output_file(&output_path, &response);
         return;
     }
@@ -1351,5 +1727,137 @@ mod tests {
         );
         // Also verify build_agent doesn't panic
         let _agent = agent_config.build_agent();
+    }
+
+    #[test]
+    fn test_streaming_bash_tool_defaults() {
+        let tool = StreamingBashTool::default();
+        assert_eq!(tool.timeout, Duration::from_secs(120));
+        assert_eq!(tool.max_output_bytes, 256 * 1024);
+        assert!(!tool.deny_patterns.is_empty());
+        assert!(tool.confirm_fn.is_none());
+    }
+
+    #[test]
+    fn test_streaming_bash_tool_deny_patterns() {
+        let tool = StreamingBashTool::default();
+        // Should contain standard safety patterns
+        assert!(tool.deny_patterns.contains(&"rm -rf /".to_string()));
+        assert!(tool.deny_patterns.contains(&"mkfs".to_string()));
+    }
+
+    #[test]
+    fn test_streaming_bash_tool_with_confirm() {
+        let tool = StreamingBashTool::default().with_confirm(|_cmd: &str| true);
+        assert!(tool.confirm_fn.is_some());
+    }
+
+    #[test]
+    fn test_streaming_bash_tool_name() {
+        use yoagent::types::AgentTool;
+        let tool = StreamingBashTool::default();
+        assert_eq!(tool.name(), "bash");
+        assert_eq!(tool.label(), "Execute Command");
+    }
+
+    #[test]
+    fn test_streaming_bash_tool_schema_has_command() {
+        use yoagent::types::AgentTool;
+        let tool = StreamingBashTool::default();
+        let schema = tool.parameters_schema();
+        let props = schema.get("properties").unwrap();
+        assert!(props.get("command").is_some());
+        let required = schema.get("required").unwrap().as_array().unwrap();
+        assert!(required.iter().any(|v| v.as_str() == Some("command")));
+    }
+
+    #[tokio::test]
+    async fn test_streaming_bash_tool_executes_echo() {
+        use yoagent::types::*;
+        let tool = StreamingBashTool::default();
+        let params = serde_json::json!({"command": "echo hello_streaming"});
+        let ctx = ToolContext {
+            tool_call_id: "test".into(),
+            tool_name: "bash".into(),
+            cancel: tokio_util::sync::CancellationToken::new(),
+            on_update: None,
+            on_progress: None,
+        };
+        let result = tool.execute(params, ctx).await.unwrap();
+        let text = match &result.content[0] {
+            Content::Text { text } => text.clone(),
+            _ => panic!("expected text"),
+        };
+        assert!(text.contains("hello_streaming"));
+        assert!(text.contains("Exit code: 0"));
+    }
+
+    #[tokio::test]
+    async fn test_streaming_bash_tool_deny_pattern_blocks() {
+        use yoagent::types::*;
+        let tool = StreamingBashTool::default();
+        let params = serde_json::json!({"command": "rm -rf /"});
+        let ctx = ToolContext {
+            tool_call_id: "test".into(),
+            tool_name: "bash".into(),
+            cancel: tokio_util::sync::CancellationToken::new(),
+            on_update: None,
+            on_progress: None,
+        };
+        let result = tool.execute(params, ctx).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_streaming_bash_tool_streams_updates() {
+        use yoagent::types::*;
+        let updates = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let updates_clone = Arc::clone(&updates);
+        let on_update: ToolUpdateFn = Arc::new(move |result: ToolResult| {
+            if let Some(Content::Text { text }) = result.content.first() {
+                updates_clone.lock().unwrap().push(text.clone());
+            }
+        });
+        let tool = StreamingBashTool::default();
+        let params = serde_json::json!({"command": "echo line1 && echo line2 && echo line3"});
+        let ctx = ToolContext {
+            tool_call_id: "test".into(),
+            tool_name: "bash".into(),
+            cancel: tokio_util::sync::CancellationToken::new(),
+            on_update: Some(on_update),
+            on_progress: None,
+        };
+        let result = tool.execute(params, ctx).await.unwrap();
+        let text = match &result.content[0] {
+            Content::Text { text } => text.clone(),
+            _ => panic!("expected text"),
+        };
+        assert!(text.contains("line1"));
+        assert!(text.contains("line2"));
+        assert!(text.contains("line3"));
+        // Verify updates were emitted
+        let captured = updates.lock().unwrap();
+        assert!(
+            captured.len() >= 3,
+            "Expected at least 3 streaming updates, got {}",
+            captured.len()
+        );
+    }
+
+    #[test]
+    fn test_is_binary_extension() {
+        assert!(is_binary_extension("libfoo.so"));
+        assert!(is_binary_extension("module.dll"));
+        assert!(is_binary_extension("app.exe"));
+        assert!(is_binary_extension("object.o"));
+        assert!(is_binary_extension("cache.pyc"));
+        assert!(is_binary_extension("image.png"));
+        assert!(is_binary_extension("archive.zip"));
+        assert!(is_binary_extension("FILE.SO")); // case insensitive
+        assert!(!is_binary_extension("main.rs"));
+        assert!(!is_binary_extension("app.py"));
+        assert!(!is_binary_extension("config.toml"));
+        assert!(!is_binary_extension("README.md"));
+        assert!(!is_binary_extension("noextension"));
     }
 }

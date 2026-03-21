@@ -30,6 +30,7 @@ pub const KNOWN_PROVIDERS: &[&str] = &[
     "mistral",
     "cerebras",
     "custom",
+    "ide",
 ];
 
 /// Permission configuration for tool execution.
@@ -331,10 +332,18 @@ pub struct Config {
     pub auto_approve: bool,
     pub permissions: PermissionConfig,
     pub dir_restrictions: DirectoryRestrictions,
+    pub serve: bool,
+    pub port: u16,
+    /// Project path override — sets the working directory for .yoyo/ state files.
+    /// When set, yoyo writes response.md, runtime_errors.jsonl, etc. relative to this path.
+    pub project_path: Option<String>,
 }
 
 /// Whether verbose output is enabled. Set once at startup.
 static VERBOSE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+/// Project path override for .yoyo/ state directory. Set once at startup.
+static PROJECT_PATH: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
 
 /// Enable verbose output.
 pub fn enable_verbose() {
@@ -344,6 +353,20 @@ pub fn enable_verbose() {
 /// Check if verbose output is enabled.
 pub fn is_verbose() -> bool {
     *VERBOSE.get_or_init(|| false)
+}
+
+/// Set the project path override.
+pub fn set_project_path(path: Option<String>) {
+    let _ = PROJECT_PATH.set(path);
+}
+
+/// Get the .yoyo directory path, respecting --project-path if set.
+/// Returns either `<project_path>/.yoyo` or just `.yoyo` (relative to CWD).
+pub fn yoyo_state_dir() -> std::path::PathBuf {
+    match PROJECT_PATH.get().and_then(|p| p.as_ref()) {
+        Some(base) => std::path::PathBuf::from(base).join(".yoyo"),
+        None => std::path::PathBuf::from(".yoyo"),
+    }
 }
 
 /// Project context file names, checked in order. YOYO.md is the canonical name;
@@ -373,6 +396,7 @@ pub fn print_help() {
     println!("  --api-key <key>   API key (overrides provider-specific env var)");
     println!("  --mcp <cmd>       Connect to an MCP server via stdio (repeatable)");
     println!("  --openapi <spec>  Load OpenAPI spec file and register API tools (repeatable)");
+    println!("  --project-path <d> Working directory for .yoyo/ state (response.md, etc.)");
     println!("  --no-color        Disable colored output (also respects NO_COLOR env)");
     println!("  --verbose, -v     Show debug info (API errors, request details)");
     println!("  --yes, -y         Auto-approve all tool executions (skip confirmation prompts)");
@@ -527,6 +551,9 @@ const KNOWN_FLAGS: &[&str] = &[
     "-h",
     "--version",
     "-V",
+    "--serve",
+    "--port",
+    "--project-path",
 ];
 
 /// Warn about any unrecognized flags in the arguments.
@@ -876,6 +903,8 @@ pub fn parse_args(args: &[String]) -> Option<Config> {
         "--deny",
         "--allow-dir",
         "--deny-dir",
+        "--port",
+        "--project-path",
     ];
     for flag in &flags_needing_values {
         if let Some(pos) = args.iter().position(|a| a == flag) {
@@ -953,8 +982,9 @@ pub fn parse_args(args: &[String]) -> Option<Config> {
                         _ => match file_config.get("api_key").cloned() {
                             Some(key) if !key.is_empty() => key,
                             _ => {
-                                // For local/ollama providers, API key is optional
-                                if provider == "ollama" || provider == "custom" {
+                                // For local/ollama/ide providers, API key is optional
+                                if provider == "ollama" || provider == "custom" || provider == "ide"
+                                {
                                     "not-needed".to_string()
                                 } else {
                                     let env_hint = provider_env_var.unwrap_or("ANTHROPIC_API_KEY");
@@ -1027,6 +1057,10 @@ pub fn parse_args(args: &[String]) -> Option<Config> {
         system_prompt.push_str("\n\n# Project Instructions\n\n");
         system_prompt.push_str(&project_context);
     }
+
+    // Note: latent space connections are now injected dynamically per-prompt
+    // by the ContextLens (SCA Context Lens pattern) rather than dumped once at startup.
+    // See context_lens.rs and the `lens` parameter in run_prompt().
 
     // --thinking <level> enables extended thinking (CLI overrides config file)
     let thinking = args
@@ -1161,6 +1195,17 @@ pub fn parse_args(args: &[String]) -> Option<Config> {
         }
     };
 
+    // --serve flag: start as OpenAI-compatible HTTP server for IDE integration
+    let serve = args.iter().any(|a| a == "--serve");
+
+    // --port <number>: custom port for --serve mode (default 8787)
+    let port = args
+        .iter()
+        .position(|a| a == "--port")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|s| s.parse::<u16>().ok())
+        .unwrap_or(crate::serve::DEFAULT_PORT);
+
     // --mcp <command> flags: collect all MCP server commands (repeatable)
     let mcp_servers: Vec<String> = args
         .iter()
@@ -1176,6 +1221,14 @@ pub fn parse_args(args: &[String]) -> Option<Config> {
         .filter(|(_, a)| a.as_str() == "--openapi")
         .filter_map(|(i, _)| args.get(i + 1).cloned())
         .collect();
+
+    // --project-path <dir>: override working directory for .yoyo/ state
+    let project_path = args
+        .iter()
+        .position(|a| a == "--project-path")
+        .and_then(|i| args.get(i + 1))
+        .cloned()
+        .or_else(|| file_config.get("project_path").cloned());
 
     Some(Config {
         model,
@@ -1197,6 +1250,9 @@ pub fn parse_args(args: &[String]) -> Option<Config> {
         auto_approve,
         permissions,
         dir_restrictions,
+        serve,
+        port,
+        project_path,
     })
 }
 
@@ -2153,6 +2209,7 @@ key = "value"
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_directory_restrictions_deny_blocks_path() {
         let restrictions = DirectoryRestrictions {
             allow: vec![],
@@ -2165,6 +2222,7 @@ key = "value"
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_directory_restrictions_allow_restricts_to_listed() {
         let cwd = std::env::current_dir()
             .unwrap()
@@ -2183,6 +2241,7 @@ key = "value"
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_directory_restrictions_deny_overrides_allow() {
         let cwd = std::env::current_dir()
             .unwrap()
@@ -2219,6 +2278,7 @@ key = "value"
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_directory_restrictions_relative_paths() {
         // Relative paths should be resolved against CWD
         let cwd = std::env::current_dir()
@@ -2236,6 +2296,7 @@ key = "value"
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_directory_restrictions_exact_dir_match() {
         let restrictions = DirectoryRestrictions {
             allow: vec![],
@@ -2250,12 +2311,14 @@ key = "value"
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_resolve_path_normalizes_parent_dir() {
         let resolved = resolve_path("/tmp/a/../b");
         assert_eq!(resolved, "/tmp/b");
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_resolve_path_absolute() {
         let resolved = resolve_path("/usr/bin/env");
         assert!(resolved.starts_with('/'));

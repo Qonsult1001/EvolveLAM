@@ -5,8 +5,10 @@ use crate::commands::{
     self, auto_compact_if_needed, command_arg_completions, is_unknown_command, thinking_level_name,
     KNOWN_COMMANDS,
 };
+use crate::context_lens::ContextLens;
 use crate::format::*;
 use crate::git::*;
+use crate::memory::ConnectionGraph;
 use crate::prompt::*;
 use crate::AgentConfig;
 
@@ -203,6 +205,16 @@ pub async fn run_repl(
     openapi_count: u32,
     continue_session: bool,
 ) {
+    // Create the SCA Context Lens for active brain injection per-prompt
+    let graph = ConnectionGraph::load();
+    let skills_path = std::path::Path::new("skills");
+    let skills_dir = if skills_path.is_dir() {
+        Some(skills_path.to_path_buf())
+    } else {
+        None
+    };
+    let lens = ContextLens::new(graph, skills_dir);
+
     let cwd = std::env::current_dir()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| "(unknown)".to_string());
@@ -256,7 +268,15 @@ pub async fn run_repl(
     }
 
     // Set up rustyline editor with slash-command tab-completion
-    let mut rl = Editor::new().expect("Failed to initialize readline");
+    let mut rl = match Editor::new() {
+        Ok(editor) => editor,
+        Err(e) => {
+            eprintln!(
+                "{RED}  Failed to initialize readline: {e}. Ensure a terminal is available.{RESET}"
+            );
+            return;
+        }
+    };
     rl.set_helper(Some(YoyoHelper));
     if let Some(history_path) = history_file_path() {
         if rl.load_history(&history_path).is_err() {
@@ -266,7 +286,14 @@ pub async fn run_repl(
 
     let mut session_total = Usage::default();
     let mut last_input: Option<String> = None;
-    let mut bookmarks = commands::Bookmarks::new();
+    let mut spawn_history = crate::commands_session::SpawnHistory::new();
+    let mut bookmarks = commands::load_bookmarks();
+    if !bookmarks.is_empty() {
+        println!(
+            "{DIM}  Loaded {} bookmark(s) from previous session.{RESET}",
+            bookmarks.len()
+        );
+    }
 
     loop {
         let prompt = if let Some(branch) = git_branch() {
@@ -415,6 +442,46 @@ pub async fn run_repl(
                 commands::handle_health();
                 continue;
             }
+            "/doctor" => {
+                commands::handle_doctor(&agent_config.provider, agent_config.base_url.as_deref());
+                continue;
+            }
+            s if s == "/errors" || s.starts_with("/errors ") => {
+                commands::handle_errors(input);
+                continue;
+            }
+            "/gap" => {
+                commands::handle_gap();
+                continue;
+            }
+            "/stats" => {
+                commands::handle_stats();
+                continue;
+            }
+            s if s == "/confidence" || s.starts_with("/confidence ") => {
+                commands::handle_confidence(input);
+                continue;
+            }
+            "/hypotheses" => {
+                commands::handle_hypotheses();
+                continue;
+            }
+            "/timing" => {
+                commands::handle_timing();
+                continue;
+            }
+            s if s == "/changelog" || s.starts_with("/changelog ") => {
+                commands::handle_changelog(input);
+                continue;
+            }
+            s if s.starts_with("/blame") => {
+                commands::handle_blame(input);
+                continue;
+            }
+            s if s == "/runtime-errors" || s.starts_with("/runtime-errors ") => {
+                commands::handle_runtime_errors(input);
+                continue;
+            }
             "/test" => {
                 commands::handle_test();
                 continue;
@@ -506,19 +573,53 @@ pub async fn run_repl(
                 continue;
             }
             s if s == "/remember" || s.starts_with("/remember ") => {
-                commands::handle_remember(input);
+                crate::commands_memory::handle_remember(input);
                 continue;
             }
             "/memories" => {
-                commands::handle_memories();
+                crate::commands_memory::handle_memories();
+                continue;
+            }
+            s if s == "/graph" || s.starts_with("/graph ") => {
+                crate::commands_memory::handle_graph(input);
                 continue;
             }
             s if s == "/forget" || s.starts_with("/forget ") => {
-                commands::handle_forget(input);
+                crate::commands_memory::handle_forget(input);
+                continue;
+            }
+            s if s == "/brain" || s.starts_with("/brain ") => {
+                crate::commands_memory::handle_brain(input);
                 continue;
             }
             "/index" => {
                 commands::handle_index();
+                continue;
+            }
+            s if s == "/ast" || s.starts_with("/ast ") => {
+                commands::handle_ast(input);
+                continue;
+            }
+            s if s == "/coupling" || s.starts_with("/coupling ") => {
+                commands::handle_coupling(input);
+                continue;
+            }
+            s if s == "/refactor" || s.starts_with("/refactor ") => {
+                if let Some(refactor_prompt) = commands::handle_refactor(input) {
+                    last_input = Some(refactor_prompt.clone());
+                    run_prompt(
+                        agent,
+                        &refactor_prompt,
+                        &mut session_total,
+                        &agent_config.model,
+                        Some(&lens),
+                    )
+                    .await;
+                }
+                continue;
+            }
+            s if s == "/research" || s.starts_with("/research ") => {
+                commands::handle_research(input);
                 continue;
             }
             "/retry" => {
@@ -552,11 +653,19 @@ pub async fn run_repl(
                     agent_config,
                     &mut session_total,
                     &agent_config.model,
+                    &mut spawn_history,
                 )
                 .await
                 {
                     last_input = Some(context_msg.clone());
-                    run_prompt(agent, &context_msg, &mut session_total, &agent_config.model).await;
+                    run_prompt(
+                        agent,
+                        &context_msg,
+                        &mut session_total,
+                        &agent_config.model,
+                        Some(&lens),
+                    )
+                    .await;
                     auto_compact_if_needed(agent);
                 }
                 continue;
@@ -580,7 +689,14 @@ pub async fn run_repl(
         }
 
         last_input = Some(input.to_string());
-        run_prompt(agent, input, &mut session_total, &agent_config.model).await;
+        run_prompt(
+            agent,
+            input,
+            &mut session_total,
+            &agent_config.model,
+            Some(&lens),
+        )
+        .await;
 
         // Auto-compact when context window is getting full
         auto_compact_if_needed(agent);
@@ -600,6 +716,17 @@ pub async fn run_repl(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    static CWD_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn lock_cwd() -> std::sync::MutexGuard<'static, ()> {
+        CWD_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
+
+    fn crate_root() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    }
 
     #[test]
     fn test_needs_continuation_backslash() {
@@ -668,6 +795,10 @@ mod tests {
     #[test]
     fn test_file_path_completion_current_dir() {
         use rustyline::history::DefaultHistory;
+        let _cwd_guard = lock_cwd();
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(crate_root()).unwrap();
+
         let helper = YoyoHelper;
         let history = DefaultHistory::new();
         let ctx = rustyline::Context::new(&history);
@@ -676,11 +807,17 @@ mod tests {
         let (start, candidates) = helper.complete("Cargo", 5, &ctx).unwrap();
         assert_eq!(start, 0);
         assert!(candidates.iter().any(|c| c == "Cargo.toml"));
+
+        std::env::set_current_dir(original_dir).unwrap();
     }
 
     #[test]
     fn test_file_path_completion_with_directory_prefix() {
         use rustyline::history::DefaultHistory;
+        let _cwd_guard = lock_cwd();
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(crate_root()).unwrap();
+
         let helper = YoyoHelper;
         let history = DefaultHistory::new();
         let ctx = rustyline::Context::new(&history);
@@ -689,6 +826,8 @@ mod tests {
         let (start, candidates) = helper.complete("src/ma", 6, &ctx).unwrap();
         assert_eq!(start, 0);
         assert!(candidates.contains(&"src/main.rs".to_string()));
+
+        std::env::set_current_dir(original_dir).unwrap();
     }
 
     #[test]
@@ -706,6 +845,10 @@ mod tests {
     #[test]
     fn test_file_path_completion_after_text() {
         use rustyline::history::DefaultHistory;
+        let _cwd_guard = lock_cwd();
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(crate_root()).unwrap();
+
         let helper = YoyoHelper;
         let history = DefaultHistory::new();
         let ctx = rustyline::Context::new(&history);
@@ -715,11 +858,17 @@ mod tests {
         let (start, candidates) = helper.complete(input, input.len(), &ctx).unwrap();
         assert_eq!(start, 9); // "read the " is 9 chars
         assert!(candidates.contains(&"src/main.rs".to_string()));
+
+        std::env::set_current_dir(original_dir).unwrap();
     }
 
     #[test]
     fn test_file_path_completion_directories_have_slash() {
         use rustyline::history::DefaultHistory;
+        let _cwd_guard = lock_cwd();
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(crate_root()).unwrap();
+
         let helper = YoyoHelper;
         let history = DefaultHistory::new();
         let ctx = rustyline::Context::new(&history);
@@ -728,6 +877,8 @@ mod tests {
         let (start, candidates) = helper.complete("sr", 2, &ctx).unwrap();
         assert_eq!(start, 0);
         assert!(candidates.contains(&"src/".to_string()));
+
+        std::env::set_current_dir(original_dir).unwrap();
     }
 
     #[test]
@@ -826,6 +977,10 @@ mod tests {
     #[test]
     fn test_arg_completion_falls_through_to_file_path() {
         use rustyline::history::DefaultHistory;
+        let _cwd_guard = lock_cwd();
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(crate_root()).unwrap();
+
         let helper = YoyoHelper;
         let history = DefaultHistory::new();
         let ctx = rustyline::Context::new(&history);
@@ -835,11 +990,17 @@ mod tests {
         let (start, candidates) = helper.complete("/docs Cargo", 11, &ctx).unwrap();
         assert_eq!(start, 6); // after "/docs "
         assert!(candidates.iter().any(|c| c == "Cargo.toml"));
+
+        std::env::set_current_dir(original_dir).unwrap();
     }
 
     #[test]
     fn test_arg_completion_no_nested_spaces() {
         use rustyline::history::DefaultHistory;
+        let _cwd_guard = lock_cwd();
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(crate_root()).unwrap();
+
         let helper = YoyoHelper;
         let history = DefaultHistory::new();
         let ctx = rustyline::Context::new(&history);
@@ -854,5 +1015,7 @@ mod tests {
             candidates.contains(&"src/".to_string()),
             "Second arg should use file path completion: {candidates:?}"
         );
+
+        std::env::set_current_dir(original_dir).unwrap();
     }
 }
